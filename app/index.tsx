@@ -9,20 +9,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFacesInPhoto } from '@infinitered/react-native-mlkit-face-detection';
-import {
-  Canvas,
-  Circle,
-  Image as SkiaImage,
-  useImage,
-  Path,
-  Skia,
-} from '@shopify/react-native-skia';
 import { Asset } from 'expo-asset';
 import * as ImagePicker from 'expo-image-picker';
+import { useSharedValue } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { extractFaceContours } from '@/lib/faceDetection';
-import type { FaceContours, Point } from '@/lib/types';
+import { buildMesh, type DeformationMesh } from '@/lib/meshDeformation';
+import { SkiaDeformCanvas } from '@/components/SkiaDeformCanvas';
+import type { FaceContours } from '@/lib/types';
 
-// Bundled test images — require() returns a module ID
+// Bundled test images
 const TEST_IMAGES = [
   {
     label: 'Front',
@@ -46,45 +42,79 @@ const TEST_IMAGES = [
   },
 ];
 
-export default function ReshapeScreen() {
-  const { width: screenWidth } = useWindowDimensions();
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  // file:// URI for both ML Kit detection and Skia rendering
-  const [imageUri, setImageUri] = useState<string | undefined>(undefined);
+type ReshapeTool = 'faceSlim' | 'eyeEnlarge' | 'noseSlim';
 
-  // Resolve bundled asset to a local file URI
+const TOOLS: { key: ReshapeTool; label: string }[] = [
+  { key: 'faceSlim', label: 'Face Slim' },
+  { key: 'eyeEnlarge', label: 'Eye Enlarge' },
+  { key: 'noseSlim', label: 'Nose Slim' },
+];
+
+export default function ReshapeScreen() {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [imageUri, setImageUri] = useState<string | undefined>(undefined);
+  const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
+  const [selectedTool, setSelectedTool] = useState<ReshapeTool>('faceSlim');
+  const [sliderValues, setSliderValues] = useState({
+    faceSlim: 0,
+    eyeEnlarge: 0,
+    noseSlim: 0,
+  });
+
+  // Shared values for 60fps Skia updates
+  const faceSlimSV = useSharedValue(0);
+  const eyeEnlargeSV = useSharedValue(0);
+  const noseSlimSV = useSharedValue(0);
+  const showOriginal = useSharedValue(false);
+
+  // Resolve bundled asset to local file URI
   useEffect(() => {
+    if (selectedImageIndex < 0) return;
     (async () => {
-      const asset = Asset.fromModule(TEST_IMAGES[selectedIndex].module);
+      const asset = Asset.fromModule(TEST_IMAGES[selectedImageIndex].module);
       await asset.downloadAsync();
       if (asset.localUri) {
         setImageUri(asset.localUri);
+        setImageSize({
+          width: asset.width ?? 1,
+          height: asset.height ?? 1,
+        });
       }
     })();
-  }, [selectedIndex]);
+  }, [selectedImageIndex]);
 
-  // Load image for Skia rendering
-  const skiaImage = useImage(imageUri ?? null);
-
-  // Run face detection on the file URI
+  // Run face detection
   const { faces, status } = useFacesInPhoto(imageUri);
 
-  // Extract contours from detected faces
+  // Extract contours
   const contours: FaceContours | null = useMemo(() => {
     if (!faces || faces.length === 0) return null;
     return extractFaceContours(faces);
   }, [faces]);
 
-  // Compute canvas dimensions to fit image
-  const canvasHeight = screenWidth * 1.2;
-  const imageWidth = skiaImage?.width() ?? 1;
-  const imageHeight = skiaImage?.height() ?? 1;
-  const scale = Math.min(
-    screenWidth / imageWidth,
-    canvasHeight / imageHeight,
-  );
-  const offsetX = (screenWidth - imageWidth * scale) / 2;
-  const offsetY = (canvasHeight - imageHeight * scale) / 2;
+  // Build deformation mesh when contours change
+  const mesh: DeformationMesh | null = useMemo(() => {
+    if (!contours) return null;
+    return buildMesh(contours, imageSize.width, imageSize.height);
+  }, [contours, imageSize.width, imageSize.height]);
+
+  // Canvas dimensions
+  const topBarHeight = 44;
+  const chipBarHeight = 36;
+  const statusHeight = 24;
+  const sliderHeight = 72;
+  const toolStripHeight = 56;
+  const bottomPadding = 34; // safe area
+  const canvasHeight =
+    screenHeight -
+    topBarHeight -
+    chipBarHeight -
+    statusHeight -
+    sliderHeight -
+    toolStripHeight -
+    bottomPadding -
+    50; // extra margin
 
   // Pick from gallery
   const pickImage = useCallback(async () => {
@@ -93,38 +123,95 @@ export default function ReshapeScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      setSelectedIndex(-1); // deselect bundled
-      setImageUri(result.assets[0].uri);
+      const asset = result.assets[0];
+      setSelectedImageIndex(-1);
+      setImageUri(asset.uri);
+      setImageSize({
+        width: asset.width ?? 1,
+        height: asset.height ?? 1,
+      });
+      // Reset sliders
+      setSliderValues({ faceSlim: 0, eyeEnlarge: 0, noseSlim: 0 });
+      faceSlimSV.value = 0;
+      eyeEnlargeSV.value = 0;
+      noseSlimSV.value = 0;
     }
-  }, []);
+  }, [faceSlimSV, eyeEnlargeSV, noseSlimSV]);
 
-  // Select a bundled test image
-  const selectTestImage = useCallback((index: number) => {
-    setSelectedIndex(index);
-  }, []);
+  // Reset all sliders
+  const resetAll = useCallback(() => {
+    setSliderValues({ faceSlim: 0, eyeEnlarge: 0, noseSlim: 0 });
+    faceSlimSV.value = 0;
+    eyeEnlargeSV.value = 0;
+    noseSlimSV.value = 0;
+  }, [faceSlimSV, eyeEnlargeSV, noseSlimSV]);
 
-  // Build Skia path from contour points for visualization
-  const buildContourPath = useCallback(
-    (points: Point[]) => {
-      if (points.length < 2) return null;
-      const path = Skia.Path.Make();
-      path.moveTo(
-        points[0].x * scale + offsetX,
-        points[0].y * scale + offsetY,
+  // Get the SharedValue for the selected tool
+  const getActiveSV = () => {
+    switch (selectedTool) {
+      case 'faceSlim':
+        return faceSlimSV;
+      case 'eyeEnlarge':
+        return eyeEnlargeSV;
+      case 'noseSlim':
+        return noseSlimSV;
+    }
+  };
+
+  // Simple pan gesture for slider
+  const sliderWidth = screenWidth - 32;
+  const panGesture = Gesture.Pan()
+    .onUpdate((e) => {
+      'worklet';
+      // Map x position to -100..100
+      const normalized = Math.max(
+        -100,
+        Math.min(100, (e.x / sliderWidth) * 200 - 100),
       );
-      for (let i = 1; i < points.length; i++) {
-        path.lineTo(
-          points[i].x * scale + offsetX,
-          points[i].y * scale + offsetY,
-        );
-      }
-      path.close();
-      return path;
-    },
-    [scale, offsetX, offsetY],
-  );
+      const sv = (() => {
+        'worklet';
+        switch (selectedTool) {
+          case 'faceSlim':
+            return faceSlimSV;
+          case 'eyeEnlarge':
+            return eyeEnlargeSV;
+          case 'noseSlim':
+            return noseSlimSV;
+        }
+      })();
+      sv.value = Math.round(normalized);
+    })
+    .onEnd(() => {
+      'worklet';
+      // Sync to JS for display
+    });
+
+  // Long press for before/after
+  const longPress = Gesture.LongPress()
+    .minDuration(200)
+    .onStart(() => {
+      'worklet';
+      showOriginal.value = true;
+    })
+    .onEnd(() => {
+      'worklet';
+      showOriginal.value = false;
+    });
 
   const isDetecting = status === 'detecting' || status === 'modelLoading';
+  const currentValue = sliderValues[selectedTool];
+
+  // Sync shared values back to display state periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSliderValues({
+        faceSlim: Math.round(faceSlimSV.value),
+        eyeEnlarge: Math.round(eyeEnlargeSV.value),
+        noseSlim: Math.round(noseSlimSV.value),
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [faceSlimSV, eyeEnlargeSV, noseSlimSV]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0D0D0D' }}>
@@ -135,39 +222,47 @@ export default function ReshapeScreen() {
           justifyContent: 'space-between',
           alignItems: 'center',
           paddingHorizontal: 16,
-          height: 44,
+          height: topBarHeight,
         }}
       >
         <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600' }}>
           Face Reshape Lab
         </Text>
-        <TouchableOpacity onPress={pickImage}>
-          <Text style={{ color: '#00D2FF', fontSize: 14 }}>Gallery</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 16 }}>
+          <TouchableOpacity onPress={resetAll}>
+            <Text style={{ color: '#FF6B6B', fontSize: 14 }}>Reset</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={pickImage}>
+            <Text style={{ color: '#00D2FF', fontSize: 14 }}>Gallery</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Test image selector */}
+      {/* Test image selector chips */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-        style={{ maxHeight: 32, marginBottom: 4 }}
+        style={{ maxHeight: chipBarHeight }}
       >
         {TEST_IMAGES.map((img, i) => (
           <TouchableOpacity
             key={i}
-            onPress={() => selectTestImage(i)}
+            onPress={() => {
+              setSelectedImageIndex(i);
+              resetAll();
+            }}
             style={{
               paddingHorizontal: 12,
-              paddingVertical: 4,
+              paddingVertical: 6,
               borderRadius: 12,
               backgroundColor:
-                selectedIndex === i ? '#00D2FF' : '#2E2E2E',
+                selectedImageIndex === i ? '#00D2FF' : '#2E2E2E',
             }}
           >
             <Text
               style={{
-                color: selectedIndex === i ? '#000000' : '#AAAAAA',
+                color: selectedImageIndex === i ? '#000000' : '#AAAAAA',
                 fontSize: 12,
                 fontWeight: '500',
               }}
@@ -179,132 +274,160 @@ export default function ReshapeScreen() {
       </ScrollView>
 
       {/* Status */}
-      <View style={{ paddingHorizontal: 16, paddingVertical: 4 }}>
-        <Text style={{ color: '#888888', fontSize: 11 }}>
+      <View
+        style={{ paddingHorizontal: 16, height: statusHeight, justifyContent: 'center' }}
+      >
+        <Text style={{ color: '#666666', fontSize: 11 }}>
           {isDetecting
             ? 'Detecting face...'
             : contours
-              ? `Face oval: ${contours.faceOval.length}pts | Eyes: ${contours.leftEye.length}+${contours.rightEye.length}pts | Nose: ${contours.noseBridge.length}+${contours.noseBottom.length}pts`
+              ? `Mesh: ${mesh?.positions.length ?? 0} vertices, ${(mesh?.indices.length ?? 0) / 3} triangles`
               : status === 'done'
-                ? 'No face found'
+                ? 'No face found — try another photo'
                 : 'Loading...'}
         </Text>
       </View>
 
-      {/* Canvas with image + contour overlay */}
-      <View style={{ flex: 1, backgroundColor: '#0D0D0D' }}>
-        {isDetecting && (
-          <View
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              justifyContent: 'center',
-              alignItems: 'center',
-              zIndex: 10,
-            }}
-          >
-            <ActivityIndicator size="large" color="#00D2FF" />
-          </View>
-        )}
-        <Canvas style={{ width: screenWidth, height: canvasHeight }}>
-          {/* Render image */}
-          {skiaImage && (
-            <SkiaImage
-              image={skiaImage}
-              x={offsetX}
-              y={offsetY}
-              width={imageWidth * scale}
-              height={imageHeight * scale}
-              fit="contain"
+      {/* Canvas with deformation */}
+      <GestureDetector gesture={longPress}>
+        <View style={{ flex: 1, backgroundColor: '#0D0D0D' }}>
+          {isDetecting && (
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                justifyContent: 'center',
+                alignItems: 'center',
+                zIndex: 10,
+              }}
+            >
+              <ActivityIndicator size="large" color="#00D2FF" />
+            </View>
+          )}
+          {imageUri && mesh && (
+            <SkiaDeformCanvas
+              imageUri={imageUri}
+              mesh={mesh}
+              canvasWidth={screenWidth}
+              canvasHeight={canvasHeight}
+              imageWidth={imageSize.width}
+              imageHeight={imageSize.height}
+              faceSlim={faceSlimSV}
+              eyeEnlarge={eyeEnlargeSV}
+              noseSlim={noseSlimSV}
+              showOriginal={showOriginal}
             />
           )}
+        </View>
+      </GestureDetector>
 
-          {/* Draw face oval contour path */}
-          {contours?.faceOval &&
-            (() => {
-              const path = buildContourPath(contours.faceOval);
-              return path ? (
-                <Path
-                  path={path}
-                  color="rgba(0, 210, 255, 0.4)"
-                  style="stroke"
-                  strokeWidth={2}
-                />
-              ) : null;
-            })()}
-
-          {/* Face oval dots */}
-          {contours?.faceOval.map((p, i) => (
-            <Circle
-              key={`oval-${i}`}
-              cx={p.x * scale + offsetX}
-              cy={p.y * scale + offsetY}
-              r={3}
-              color="rgba(0, 210, 255, 0.8)"
-            />
-          ))}
-
-          {/* Left eye dots */}
-          {contours?.leftEye.map((p, i) => (
-            <Circle
-              key={`leye-${i}`}
-              cx={p.x * scale + offsetX}
-              cy={p.y * scale + offsetY}
-              r={2.5}
-              color="rgba(0, 255, 100, 0.8)"
-            />
-          ))}
-
-          {/* Right eye dots */}
-          {contours?.rightEye.map((p, i) => (
-            <Circle
-              key={`reye-${i}`}
-              cx={p.x * scale + offsetX}
-              cy={p.y * scale + offsetY}
-              r={2.5}
-              color="rgba(0, 255, 100, 0.8)"
-            />
-          ))}
-
-          {/* Nose bridge dots */}
-          {contours?.noseBridge.map((p, i) => (
-            <Circle
-              key={`nbridge-${i}`}
-              cx={p.x * scale + offsetX}
-              cy={p.y * scale + offsetY}
-              r={2.5}
-              color="rgba(255, 200, 0, 0.8)"
-            />
-          ))}
-
-          {/* Nose bottom dots */}
-          {contours?.noseBottom.map((p, i) => (
-            <Circle
-              key={`nbottom-${i}`}
-              cx={p.x * scale + offsetX}
-              cy={p.y * scale + offsetY}
-              r={2.5}
-              color="rgba(255, 150, 0, 0.8)"
-            />
-          ))}
-        </Canvas>
-      </View>
-
-      {/* Legend */}
+      {/* Slider */}
       <View
         style={{
+          height: sliderHeight,
           paddingHorizontal: 16,
-          paddingVertical: 12,
+          justifyContent: 'center',
           backgroundColor: '#1A1A1A',
         }}
       >
-        <Text style={{ color: '#666666', fontSize: 11, textAlign: 'center' }}>
-          cyan = face oval | green = eyes | yellow = nose bridge | orange = nose
-          bottom
-        </Text>
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            marginBottom: 8,
+          }}
+        >
+          <Text style={{ color: '#AAAAAA', fontSize: 12 }}>
+            {TOOLS.find((t) => t.key === selectedTool)?.label}
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '600' }}>
+            {currentValue}
+          </Text>
+        </View>
+        <GestureDetector gesture={panGesture}>
+          <View
+            style={{
+              height: 24,
+              backgroundColor: '#2E2E2E',
+              borderRadius: 12,
+              justifyContent: 'center',
+            }}
+          >
+            {/* Zero marker */}
+            <View
+              style={{
+                position: 'absolute',
+                left: '50%',
+                width: 1,
+                height: 12,
+                backgroundColor: '#666666',
+              }}
+            />
+            {/* Thumb indicator */}
+            <View
+              style={{
+                position: 'absolute',
+                left: `${((currentValue + 100) / 200) * 100}%`,
+                width: 18,
+                height: 18,
+                borderRadius: 9,
+                backgroundColor: '#FFFFFF',
+                marginLeft: -9,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.3,
+                shadowRadius: 3,
+              }}
+            />
+          </View>
+        </GestureDetector>
+      </View>
+
+      {/* Tool strip */}
+      <View
+        style={{
+          flexDirection: 'row',
+          height: toolStripHeight,
+          backgroundColor: '#1A1A1A',
+          borderTopWidth: 1,
+          borderTopColor: '#2E2E2E',
+        }}
+      >
+        {TOOLS.map((tool) => (
+          <TouchableOpacity
+            key={tool.key}
+            onPress={() => setSelectedTool(tool.key)}
+            style={{
+              flex: 1,
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
+            <Text
+              style={{
+                color: selectedTool === tool.key ? '#00D2FF' : '#888888',
+                fontSize: 12,
+                fontWeight: selectedTool === tool.key ? '600' : '400',
+              }}
+            >
+              {tool.label}
+            </Text>
+            {selectedTool === tool.key && (
+              <View
+                style={{
+                  width: 4,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: '#00D2FF',
+                  marginTop: 4,
+                }}
+              />
+            )}
+          </TouchableOpacity>
+        ))}
       </View>
     </SafeAreaView>
   );
