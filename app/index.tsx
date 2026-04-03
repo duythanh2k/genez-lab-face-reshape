@@ -307,7 +307,7 @@ export default function ReshapeScreen() {
               <ActivityIndicator size="large" color="#00D2FF" />
             </View>
           )}
-          {imageUri && mesh && (
+          {imageUri && mesh && contours && (
             <SkiaDeformCanvas
               imageUri={imageUri}
               mesh={mesh}
@@ -315,6 +315,7 @@ export default function ReshapeScreen() {
               canvasHeight={canvasHeight}
               imageWidth={imageSize.width}
               imageHeight={imageSize.height}
+              faceOval={contours.faceOval}
               faceSlim={faceSlimSV}
               eyeEnlarge={eyeEnlargeSV}
               noseSlim={noseSlimSV}
