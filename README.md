@@ -1,50 +1,63 @@
-# Welcome to your Expo app 👋
+# LAB-M3: Face Reshape
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A standalone Expo lab proving face reshaping (face slim, eye enlarge, nose slim) with background lock, before integrating into the main Genez photo editor.
 
-## Get started
+## What This Lab Proves
 
-1. Install dependencies
+- ML Kit face detection provides accurate enough contour points for reshaping
+- Delaunay triangulation + Skia `drawVertices` can produce smooth face deformation
+- Background lock via feathered mask prevents warping artifacts outside the face
+- 60fps real-time preview via Reanimated SharedValues + Skia UI-thread rendering
 
-   ```bash
-   npm install
-   ```
+## How to Run
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+This lab requires a **dev build** (not Expo Go) because `@infinitered/react-native-mlkit-face-detection` is a native module.
 
 ```bash
-npm run reset-project
+# Install dependencies
+bun install
+
+# Generate native projects
+npx expo prebuild --clean
+
+# Run on iOS (or open ios/FaceReshapeLab.xcworkspace in Xcode)
+npx expo run:ios
+
+# Run on Android
+npx expo run:android
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Architecture
 
-## Learn more
+```
+Image Load -> ML Kit Face Detection -> Delaunay Mesh -> Displacement -> Skia Render
+                                                            ^
+                                              Slider SharedValue (UI thread)
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+1. **Face Detection** (`lib/faceDetection.ts`): ML Kit extracts face oval, eye, nose contour points
+2. **Mesh Generation** (`lib/meshDeformation.ts`): Delaunay triangulation from contours + background grid
+3. **Displacement** (`lib/displacements.ts`): Worklet-safe math runs on UI thread every frame
+4. **Background Lock** (`lib/backgroundBlend.ts`): Expanded face oval path with blur feather
+5. **Rendering** (`components/SkiaDeformCanvas.tsx`): Two-layer Vertices -- original background + masked deformed face
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Dependencies
 
-## Join the community
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `expo` | ~54.0.0 | Framework |
+| `@shopify/react-native-skia` | 2.2.12 | GPU rendering |
+| `@infinitered/react-native-mlkit-face-detection` | ^5.0.0 | Face contour detection |
+| `react-native-reanimated` | ~4.1.1 | UI-thread animations |
+| `react-native-gesture-handler` | ~2.28.0 | Touch gestures |
+| `delaunator` | ^5.0.0 | Delaunay triangulation |
+| `zustand` | ^5.0.0 | State management |
 
-Join our community of developers creating universal apps.
+## Test Images
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+5 bundled Unsplash portraits in `assets/images/test-faces/`:
+1. Front-facing portrait
+2. Slightly angled face
+3. Face near straight lines (background lock test)
+4. Multiple faces (largest face selected)
+5. Low light conditions
