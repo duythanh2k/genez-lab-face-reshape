@@ -14,7 +14,7 @@ import type { Point } from './types';
 export function buildExpandedFaceOvalPath(
   faceOval: Point[],
   expandPx: number = 20,
-  verticalExtra: number = 1.5,
+  verticalExtra: number = 2.5,
 ): SkPath {
   if (faceOval.length < 3) return Skia.Path.Make();
 
