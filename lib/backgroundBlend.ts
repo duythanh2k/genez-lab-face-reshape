@@ -3,32 +3,18 @@ import type { SkPath } from '@shopify/react-native-skia';
 import type { Point } from './types';
 
 /**
- * Build a Skia Path from face oval contour points.
- * Used as a soft mask for background lock blending.
- */
-export function buildFaceOvalPath(faceOval: Point[]): SkPath {
-  const path = Skia.Path.Make();
-  if (faceOval.length < 3) return path;
-
-  path.moveTo(faceOval[0].x, faceOval[0].y);
-  for (let i = 1; i < faceOval.length; i++) {
-    path.lineTo(faceOval[i].x, faceOval[i].y);
-  }
-  path.close();
-  return path;
-}
-
-/**
- * Build an expanded face oval path for the mask.
- * Expands outward from the centroid so the feather blur
- * doesn't eat into the face region.
+ * Build an expanded face oval path for the background lock mask.
+ * Expands outward from the centroid with extra vertical padding
+ * to accommodate chin/forehead displacement.
  *
  * @param faceOval - Original face oval contour points
- * @param expandPx - Pixels to expand outward (default 20)
+ * @param expandPx - Base pixels to expand outward horizontally
+ * @param verticalExtra - Extra vertical expansion (default 1.5x of horizontal)
  */
 export function buildExpandedFaceOvalPath(
   faceOval: Point[],
   expandPx: number = 20,
+  verticalExtra: number = 1.5,
 ): SkPath {
   if (faceOval.length < 3) return Skia.Path.Make();
 
@@ -43,12 +29,25 @@ export function buildExpandedFaceOvalPath(
   cy /= faceOval.length;
 
   // Expand each point outward from centroid
+  // More expansion vertically (for chin/forehead) than horizontally
   const expanded: Point[] = faceOval.map((p) => {
     const dx = p.x - cx;
     const dy = p.y - cy;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 1) return p;
-    const factor = (dist + expandPx) / dist;
+
+    // Directional expansion: more vertical, less horizontal
+    const horizontalExpand = expandPx;
+    const verticalExpand = expandPx * verticalExtra;
+
+    // Blend expansion based on direction angle
+    const angle = Math.atan2(Math.abs(dy), Math.abs(dx));
+    // angle 0 = horizontal, PI/2 = vertical
+    const verticalness = angle / (Math.PI / 2); // 0..1
+    const dirExpand =
+      horizontalExpand + (verticalExpand - horizontalExpand) * verticalness;
+
+    const factor = (dist + dirExpand) / dist;
     return {
       x: cx + dx * factor,
       y: cy + dy * factor,

@@ -116,7 +116,7 @@ export function SkiaDeformCanvas({
       if (p.x < minX) minX = p.x;
       if (p.x > maxX) maxX = p.x;
     }
-    return Math.max(40, (maxX - minX) * 0.2);
+    return Math.max(50, (maxX - minX) * 0.25);
   }, [faceOval]);
 
   const maskPath = useMemo(() => {
