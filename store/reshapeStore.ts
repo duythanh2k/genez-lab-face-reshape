@@ -2,12 +2,29 @@ import { create } from 'zustand';
 import type { FaceContours } from '@/lib/types';
 import type { DeformationMesh } from '@/lib/meshDeformation';
 
-export type ReshapeTool = 'faceSlim' | 'eyeEnlarge' | 'noseSlim';
+export type ReshapeTool =
+  | 'faceSlim'
+  | 'jawline'
+  | 'chin'
+  | 'eyeEnlarge'
+  | 'eyeDistance'
+  | 'noseSlim'
+  | 'noseLength'
+  | 'lipFullness'
+  | 'smile'
+  | 'forehead';
 
 export const RESHAPE_TOOLS: { key: ReshapeTool; label: string }[] = [
   { key: 'faceSlim', label: 'Face Slim' },
-  { key: 'eyeEnlarge', label: 'Eye Enlarge' },
+  { key: 'jawline', label: 'Jawline' },
+  { key: 'chin', label: 'Chin' },
+  { key: 'forehead', label: 'Forehead' },
+  { key: 'eyeEnlarge', label: 'Eye Size' },
+  { key: 'eyeDistance', label: 'Eye Dist' },
   { key: 'noseSlim', label: 'Nose Slim' },
+  { key: 'noseLength', label: 'Nose Len' },
+  { key: 'lipFullness', label: 'Lips' },
+  { key: 'smile', label: 'Smile' },
 ];
 
 interface ReshapeState {
@@ -32,8 +49,15 @@ interface ReshapeState {
 
 const INITIAL_VALUES: Record<ReshapeTool, number> = {
   faceSlim: 0,
+  jawline: 0,
+  chin: 0,
+  forehead: 0,
   eyeEnlarge: 0,
+  eyeDistance: 0,
   noseSlim: 0,
+  noseLength: 0,
+  lipFullness: 0,
+  smile: 0,
 };
 
 export const useReshapeStore = create<ReshapeState>((set) => ({

@@ -25,9 +25,7 @@ interface SkiaDeformCanvasProps {
   imageWidth: number;
   imageHeight: number;
   faceOval: Point[];
-  faceSlim: SharedValue<number>;
-  eyeEnlarge: SharedValue<number>;
-  noseSlim: SharedValue<number>;
+  sliderValues: Record<string, SharedValue<number>>;
   showOriginal: SharedValue<boolean>;
 }
 
@@ -90,9 +88,7 @@ export function SkiaDeformCanvas({
   imageWidth,
   imageHeight,
   faceOval,
-  faceSlim,
-  eyeEnlarge,
-  noseSlim,
+  sliderValues: sv,
   showOriginal,
 }: SkiaDeformCanvasProps) {
   const image = useSkiaImage(imageUri);
@@ -139,6 +135,9 @@ export function SkiaDeformCanvas({
   const leftEyeCenter = mesh.leftEyeCenter;
   const rightEyeCenter = mesh.rightEyeCenter;
   const noseCenterX = mesh.noseCenterX;
+  const lipCenter = mesh.lipCenter;
+  const chinPoint = mesh.chinPoint;
+  const foreheadPoint = mesh.foreheadPoint;
 
   // Displaced vertices on UI thread
   const displayVertices = useDerivedValue(() => {
@@ -155,15 +154,25 @@ export function SkiaDeformCanvas({
       leftEyeCenter,
       rightEyeCenter,
       noseCenterX,
-      faceSlim.value,
-      eyeEnlarge.value,
-      noseSlim.value,
+      lipCenter,
+      chinPoint,
+      foreheadPoint,
+      sv.faceSlim.value,
+      sv.jawline.value,
+      sv.chin.value,
+      sv.forehead.value,
+      sv.eyeEnlarge.value,
+      sv.eyeDistance.value,
+      sv.noseSlim.value,
+      sv.noseLength.value,
+      sv.lipFullness.value,
+      sv.smile.value,
     );
 
     return displaced.map((p: Point) =>
       vec(p.x * scale + offsetX, p.y * scale + offsetY),
     );
-  }, [faceSlim, eyeEnlarge, noseSlim, showOriginal]);
+  }, [sv.faceSlim, sv.jawline, sv.chin, sv.forehead, sv.eyeEnlarge, sv.eyeDistance, sv.noseSlim, sv.noseLength, sv.lipFullness, sv.smile, showOriginal]);
 
   // Original vertices for background layer
   const originalVertices = useMemo(

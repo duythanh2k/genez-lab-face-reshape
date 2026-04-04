@@ -1,28 +1,37 @@
 import Delaunator from 'delaunator';
 import type { FaceContours, Point } from './types';
 
+export interface LandmarkIndices {
+  faceOval: number[];
+  leftEye: number[];
+  rightEye: number[];
+  leftEyebrowTop: number[];
+  leftEyebrowBottom: number[];
+  rightEyebrowTop: number[];
+  rightEyebrowBottom: number[];
+  noseBridge: number[];
+  noseBottom: number[];
+  upperLipTop: number[];
+  upperLipBottom: number[];
+  lowerLipTop: number[];
+  lowerLipBottom: number[];
+}
+
 export interface DeformationMesh {
-  /** Original vertex positions as SkPoint-compatible array */
   positions: Point[];
-  /** Triangle indices from Delaunay triangulation */
   indices: number[];
-  /** Texture UV coordinates (0..1, maps to original image) */
   texCoords: Point[];
-  /** Indices into positions[] for each landmark group */
-  landmarkIndices: {
-    faceOval: number[];
-    leftEye: number[];
-    rightEye: number[];
-    noseBridge: number[];
-    noseBottom: number[];
-  };
-  /** Precomputed face center for displacement calculations */
+  landmarkIndices: LandmarkIndices;
   faceCenter: Point;
-  /** Precomputed eye centers */
   leftEyeCenter: Point;
   rightEyeCenter: Point;
-  /** Precomputed nose center X */
   noseCenterX: number;
+  /** Precomputed lip center */
+  lipCenter: Point;
+  /** Precomputed chin point (bottom of face oval) */
+  chinPoint: Point;
+  /** Precomputed forehead point (top of face oval) */
+  foreheadPoint: Point;
 }
 
 /** Compute the centroid of a set of points */
@@ -47,12 +56,20 @@ export function buildMesh(
   imageHeight: number,
 ): DeformationMesh {
   const positions: Point[] = [];
-  const landmarkIndices = {
-    faceOval: [] as number[],
-    leftEye: [] as number[],
-    rightEye: [] as number[],
-    noseBridge: [] as number[],
-    noseBottom: [] as number[],
+  const landmarkIndices: LandmarkIndices = {
+    faceOval: [],
+    leftEye: [],
+    rightEye: [],
+    leftEyebrowTop: [],
+    leftEyebrowBottom: [],
+    rightEyebrowTop: [],
+    rightEyebrowBottom: [],
+    noseBridge: [],
+    noseBottom: [],
+    upperLipTop: [],
+    upperLipBottom: [],
+    lowerLipTop: [],
+    lowerLipBottom: [],
   };
 
   // 1. Add all contour points and track their indices
@@ -66,8 +83,16 @@ export function buildMesh(
   addContour(contours.faceOval, landmarkIndices.faceOval);
   addContour(contours.leftEye, landmarkIndices.leftEye);
   addContour(contours.rightEye, landmarkIndices.rightEye);
+  addContour(contours.leftEyebrowTop, landmarkIndices.leftEyebrowTop);
+  addContour(contours.leftEyebrowBottom, landmarkIndices.leftEyebrowBottom);
+  addContour(contours.rightEyebrowTop, landmarkIndices.rightEyebrowTop);
+  addContour(contours.rightEyebrowBottom, landmarkIndices.rightEyebrowBottom);
   addContour(contours.noseBridge, landmarkIndices.noseBridge);
   addContour(contours.noseBottom, landmarkIndices.noseBottom);
+  addContour(contours.upperLipTop, landmarkIndices.upperLipTop);
+  addContour(contours.upperLipBottom, landmarkIndices.upperLipBottom);
+  addContour(contours.lowerLipTop, landmarkIndices.lowerLipTop);
+  addContour(contours.lowerLipBottom, landmarkIndices.lowerLipBottom);
 
   // 2. Add background grid points (spaced ~40px apart, capping mesh size)
   const gridSpacing = Math.max(40, Math.min(imageWidth, imageHeight) / 25);
@@ -130,6 +155,27 @@ export function buildMesh(
       ? allNosePoints.reduce((s, p) => s + p.x, 0) / allNosePoints.length
       : faceCenter.x;
 
+  // Lip center
+  const allLipPoints = [
+    ...contours.upperLipTop,
+    ...contours.upperLipBottom,
+    ...contours.lowerLipTop,
+    ...contours.lowerLipBottom,
+  ];
+  const lipCenter = allLipPoints.length > 0 ? centroid(allLipPoints) : { x: faceCenter.x, y: faceCenter.y + (faceCenter.y - (contours.faceOval[0]?.y ?? faceCenter.y)) * 0.3 };
+
+  // Chin = bottommost face oval point
+  let chinPoint = contours.faceOval[0] ?? faceCenter;
+  for (const p of contours.faceOval) {
+    if (p.y > chinPoint.y) chinPoint = p;
+  }
+
+  // Forehead = topmost face oval point
+  let foreheadPoint = contours.faceOval[0] ?? faceCenter;
+  for (const p of contours.faceOval) {
+    if (p.y < foreheadPoint.y) foreheadPoint = p;
+  }
+
   return {
     positions,
     indices,
@@ -139,5 +185,8 @@ export function buildMesh(
     leftEyeCenter,
     rightEyeCenter,
     noseCenterX,
+    lipCenter,
+    chinPoint,
+    foreheadPoint,
   };
 }

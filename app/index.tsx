@@ -35,23 +35,22 @@ export default function ReshapeScreen() {
   const setFaceContours = useReshapeStore((s) => s.setFaceContours);
   const setMesh = useReshapeStore((s) => s.setMesh);
 
-  // Shared values for 60fps Skia updates
-  const faceSlimSV = useSharedValue(0);
-  const eyeEnlargeSV = useSharedValue(0);
-  const noseSlimSV = useSharedValue(0);
+  // Shared values for 60fps Skia updates — one per tool
+  const svMap = {
+    faceSlim: useSharedValue(0),
+    jawline: useSharedValue(0),
+    chin: useSharedValue(0),
+    forehead: useSharedValue(0),
+    eyeEnlarge: useSharedValue(0),
+    eyeDistance: useSharedValue(0),
+    noseSlim: useSharedValue(0),
+    noseLength: useSharedValue(0),
+    lipFullness: useSharedValue(0),
+    smile: useSharedValue(0),
+  };
   const showOriginal = useSharedValue(false);
 
-  // Get the SharedValue for the selected tool
-  const activeSharedValue = useMemo(() => {
-    switch (selectedTool) {
-      case 'faceSlim':
-        return faceSlimSV;
-      case 'eyeEnlarge':
-        return eyeEnlargeSV;
-      case 'noseSlim':
-        return noseSlimSV;
-    }
-  }, [selectedTool, faceSlimSV, eyeEnlargeSV, noseSlimSV]);
+  const activeSharedValue = svMap[selectedTool];
 
   // Resolve bundled asset to local JPEG URI
   useEffect(() => {
@@ -62,12 +61,10 @@ export default function ReshapeScreen() {
       if (asset.localUri) {
         setImage(asset.localUri, asset.width ?? 1, asset.height ?? 1);
         // Reset shared values
-        faceSlimSV.value = 0;
-        eyeEnlargeSV.value = 0;
-        noseSlimSV.value = 0;
+        for (const key of Object.keys(svMap)) svMap[key as keyof typeof svMap].value = 0;
       }
     })();
-  }, [selectedImageIndex, setImage, faceSlimSV, eyeEnlargeSV, noseSlimSV]);
+  }, [selectedImageIndex, setImage]);
 
   // Run face detection
   const { faces, status, error } = useFacesInPhoto(imageUri ?? undefined);
@@ -137,10 +134,8 @@ export default function ReshapeScreen() {
   // Handle reset all
   const handleResetAll = useCallback(() => {
     resetAll();
-    faceSlimSV.value = 0;
-    eyeEnlargeSV.value = 0;
-    noseSlimSV.value = 0;
-  }, [resetAll, faceSlimSV, eyeEnlargeSV, noseSlimSV]);
+    for (const key of Object.keys(svMap)) svMap[key as keyof typeof svMap].value = 0;
+  }, [resetAll]);
 
   // Handle test image select
   const handleSelectTestImage = useCallback(
@@ -162,11 +157,9 @@ export default function ReshapeScreen() {
       });
       console.log('[Gallery] converted to JPEG:', result.uri.slice(-30), result.width, 'x', result.height);
       setImage(result.uri, result.width, result.height);
-      faceSlimSV.value = 0;
-      eyeEnlargeSV.value = 0;
-      noseSlimSV.value = 0;
+      for (const key of Object.keys(svMap)) svMap[key as keyof typeof svMap].value = 0;
     },
-    [setImage, faceSlimSV, eyeEnlargeSV, noseSlimSV],
+    [setImage],
   );
 
   // Long press for before/after
@@ -234,9 +227,7 @@ export default function ReshapeScreen() {
               imageWidth={imageWidth}
               imageHeight={imageHeight}
               faceOval={faceContours.faceOval}
-              faceSlim={faceSlimSV}
-              eyeEnlarge={eyeEnlargeSV}
-              noseSlim={noseSlimSV}
+              sliderValues={svMap}
               showOriginal={showOriginal}
             />
           )}

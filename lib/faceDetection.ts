@@ -147,6 +147,18 @@ export function extractFaceContours(
       ? { noseBridge, noseBottom }
       : syntheticNose(bbox.x, bbox.y, bbox.width, bbox.height);
 
+  // Lip contours
+  const upperLipTop = getContour('UpperLipTop', 'upperLipTop') ?? [];
+  const upperLipBottom = getContour('UpperLipBottom', 'upperLipBottom') ?? [];
+  const lowerLipTop = getContour('LowerLipTop', 'lowerLipTop') ?? [];
+  const lowerLipBottom = getContour('LowerLipBottom', 'lowerLipBottom') ?? [];
+
+  // Eyebrow contours
+  const leftEyebrowTop = getContour('LeftEyebrowTop', 'leftEyebrowTop') ?? [];
+  const leftEyebrowBottom = getContour('LeftEyebrowBottom', 'leftEyebrowBottom') ?? [];
+  const rightEyebrowTop = getContour('RightEyebrowTop', 'rightEyebrowTop') ?? [];
+  const rightEyebrowBottom = getContour('RightEyebrowBottom', 'rightEyebrowBottom') ?? [];
+
   console.log(
     `[FaceDetection] Using ${contourMap.size > 0 ? 'real' : 'synthetic'} contours. Map size: ${contourMap.size}`,
   );
@@ -155,8 +167,16 @@ export function extractFaceContours(
     faceOval,
     leftEye: eyes.leftEye,
     rightEye: eyes.rightEye,
+    leftEyebrowTop,
+    leftEyebrowBottom,
+    rightEyebrowTop,
+    rightEyebrowBottom,
     noseBridge: nose.noseBridge,
     noseBottom: nose.noseBottom,
+    upperLipTop,
+    upperLipBottom,
+    lowerLipTop,
+    lowerLipBottom,
     boundingBox: bbox,
   };
 }
