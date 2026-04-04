@@ -1,17 +1,16 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Canvas,
   Vertices,
-  ImageShader,
   Image as SkiaImage,
-  useImage,
   vec,
   Group,
-  Paint,
   Path,
   Blur,
   Skia,
+  ImageShader,
 } from '@shopify/react-native-skia';
+import type { SkImage } from '@shopify/react-native-skia';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import type { DeformationMesh } from '@/lib/meshDeformation';
 import { computeDisplacedPositions } from '@/lib/displacements';
@@ -32,10 +31,57 @@ interface SkiaDeformCanvasProps {
   showOriginal: SharedValue<boolean>;
 }
 
-/** Feather radius for the face mask soft edge */
 const FEATHER_RADIUS = 15;
-/** Expand the mask outward so blur doesn't eat into the face */
 const MASK_EXPAND_PX = 25;
+
+/**
+ * Load image via fetch → base64 → Skia.
+ * fetch() on iOS triggers automatic HEIC→JPEG transcoding,
+ * so this handles all formats that iOS supports.
+ */
+function useSkiaImage(uri: string | null): SkImage | null {
+  const [image, setImage] = useState<SkImage | null>(null);
+
+  useEffect(() => {
+    if (!uri) {
+      setImage(null);
+      return;
+    }
+    setImage(null);
+
+    (async () => {
+      try {
+        // fetch() on file:// URIs triggers iOS transcoding for HEIC
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          // Strip data:image/...;base64, prefix
+          const raw = base64.split(',')[1];
+          if (!raw) {
+            console.log('[useSkiaImage] no base64 data');
+            return;
+          }
+          const data = Skia.Data.fromBase64(raw);
+          const img = Skia.Image.MakeImageFromEncoded(data);
+          console.log(
+            '[useSkiaImage] loaded:',
+            uri.slice(-30),
+            img ? `${img.width()}x${img.height()}` : 'FAILED',
+          );
+          setImage(img);
+        };
+        reader.readAsDataURL(blob);
+      } catch (err) {
+        console.log('[useSkiaImage] error:', err);
+        setImage(null);
+      }
+    })();
+  }, [uri]);
+
+  return image;
+}
 
 export function SkiaDeformCanvas({
   imageUri,
@@ -50,27 +96,24 @@ export function SkiaDeformCanvas({
   noseSlim,
   showOriginal,
 }: SkiaDeformCanvasProps) {
-  const image = useImage(imageUri);
+  const image = useSkiaImage(imageUri);
 
   // Compute display scale and offset to fit image in canvas
   const scale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
   const offsetX = (canvasWidth - imageWidth * scale) / 2;
   const offsetY = (canvasHeight - imageHeight * scale) / 2;
+  const displayWidth = imageWidth * scale;
+  const displayHeight = imageHeight * scale;
 
-  // Convert mesh texture coords to pixel coords in the image
+  // Texture coords: map mesh UV (0..1) to pixel positions in source image
   const texturePoints = useMemo(
     () => mesh.texCoords.map((t) => vec(t.x * imageWidth, t.y * imageHeight)),
     [mesh.texCoords, imageWidth, imageHeight],
   );
 
-  // Build face mask path (expanded + in display coords for the canvas)
+  // Face mask path in display coordinates
   const maskPath = useMemo(() => {
-    const expandedOval = faceOval.map((p) => ({
-      x: p.x,
-      y: p.y,
-    }));
-    const path = buildExpandedFaceOvalPath(expandedOval, MASK_EXPAND_PX);
-    // Transform to display coordinates
+    const path = buildExpandedFaceOvalPath(faceOval, MASK_EXPAND_PX);
     const matrix = Skia.Matrix();
     matrix.translate(offsetX, offsetY);
     matrix.scale(scale, scale);
@@ -78,7 +121,7 @@ export function SkiaDeformCanvas({
     return path;
   }, [faceOval, scale, offsetX, offsetY]);
 
-  // Precompute data for the worklet
+  // Precompute for worklet
   const originalPositions = mesh.positions;
   const landmarkIndices = mesh.landmarkIndices;
   const faceCenter = mesh.faceCenter;
@@ -86,7 +129,7 @@ export function SkiaDeformCanvas({
   const rightEyeCenter = mesh.rightEyeCenter;
   const noseCenterX = mesh.noseCenterX;
 
-  // Compute displaced vertex positions on the UI thread every frame
+  // Displaced vertices on UI thread
   const displayVertices = useDerivedValue(() => {
     if (showOriginal.value) {
       return originalPositions.map((p: Point) =>
@@ -111,7 +154,7 @@ export function SkiaDeformCanvas({
     );
   }, [faceSlim, eyeEnlarge, noseSlim, showOriginal]);
 
-  // Original (non-deformed) vertex positions for background layer
+  // Original vertices for background layer
   const originalVertices = useMemo(
     () =>
       originalPositions.map((p) =>
@@ -120,40 +163,34 @@ export function SkiaDeformCanvas({
     [originalPositions, scale, offsetX, offsetY],
   );
 
-  // A static paint for the save layer
   const layerPaint = useMemo(() => Skia.Paint(), []);
 
   if (!image) return null;
 
-  const imgRect = { x: 0, y: 0, width: imageWidth, height: imageHeight };
-
   return (
     <Canvas style={{ width: canvasWidth, height: canvasHeight }}>
-      {/* Layer 1: Original image (background — never deformed) */}
-      <Vertices
-        vertices={originalVertices}
-        textures={texturePoints}
-        indices={mesh.indices}
-        mode="triangles"
-      >
-        <ImageShader image={image} fit="fill" rect={imgRect} tx="clamp" ty="clamp" />
-      </Vertices>
+      {/* Layer 1: Original image as background */}
+      <SkiaImage
+        image={image}
+        x={offsetX}
+        y={offsetY}
+        width={displayWidth}
+        height={displayHeight}
+        fit="fill"
+      />
 
-      {/* Layer 2: Deformed face, masked to face oval with soft feathered edge */}
-      {/* SaveLayer isolates the deformed content so DstIn mask works correctly */}
+      {/* Layer 2: Deformed face masked to face oval */}
       <Group layer={layerPaint}>
-        {/* Draw deformed mesh */}
         <Vertices
           vertices={displayVertices}
           textures={texturePoints}
           indices={mesh.indices}
           mode="triangles"
         >
-          <ImageShader image={image} fit="fill" rect={imgRect} tx="clamp" ty="clamp" />
+          <ImageShader image={image} tx="clamp" ty="clamp" />
         </Vertices>
 
-        {/* Mask: DstIn keeps only the intersection of deformed content + mask shape */}
-        {/* The blurred path creates the soft feathered edge */}
+        {/* Mask */}
         <Group blendMode="dstIn">
           <Path path={maskPath} color="white" style="fill">
             <Blur blur={FEATHER_RADIUS} />

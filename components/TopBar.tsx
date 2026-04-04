@@ -44,7 +44,7 @@ export const TEST_IMAGES = [
 interface TopBarProps {
   selectedImageIndex: number;
   onSelectTestImage: (index: number) => void;
-  onPickGalleryImage: (uri: string, width: number, height: number) => void;
+  onPickGalleryImage: (uri: string, width: number, height: number) => void | Promise<void>;
   onResetAll: () => void;
 }
 

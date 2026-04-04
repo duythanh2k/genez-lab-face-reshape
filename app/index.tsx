@@ -52,7 +52,7 @@ export default function ReshapeScreen() {
     }
   }, [selectedTool, faceSlimSV, eyeEnlargeSV, noseSlimSV]);
 
-  // Resolve bundled asset to local file URI
+  // Resolve bundled asset to local JPEG URI
   useEffect(() => {
     if (selectedImageIndex < 0) return;
     (async () => {
@@ -69,7 +69,27 @@ export default function ReshapeScreen() {
   }, [selectedImageIndex, setImage, faceSlimSV, eyeEnlargeSV, noseSlimSV]);
 
   // Run face detection
-  const { faces, status } = useFacesInPhoto(imageUri ?? undefined);
+  const { faces, status, error } = useFacesInPhoto(imageUri ?? undefined);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('[Debug] imageUri:', imageUri);
+    console.log('[Debug] imageSize:', imageWidth, 'x', imageHeight);
+  }, [imageUri, imageWidth, imageHeight]);
+
+  useEffect(() => {
+    console.log('[FaceDetection] status:', status, 'faces:', faces?.length ?? 0, 'error:', error);
+    if (faces && faces.length > 0) {
+      const f = faces[0];
+      console.log('[FaceDetection] face frame:', JSON.stringify(f.frame));
+      console.log('[FaceDetection] contours count:', f.contours?.length ?? 0);
+      if (f.contours && f.contours.length > 0) {
+        for (const c of f.contours) {
+          console.log(`[FaceDetection] contour: ${c.type}, points: ${c.points?.length ?? 0}`);
+        }
+      }
+    }
+  }, [faces, status, error]);
 
   // Extract contours and build mesh when faces change
   useEffect(() => {
@@ -79,6 +99,7 @@ export default function ReshapeScreen() {
       return;
     }
     const contours = extractFaceContours(faces);
+    console.log('[FaceDetection] extracted contours:', contours ? 'yes' : 'null');
     setFaceContours(contours);
     if (contours) {
       setMesh(buildMesh(contours, imageWidth, imageHeight));
@@ -129,7 +150,7 @@ export default function ReshapeScreen() {
     [handleResetAll],
   );
 
-  // Handle gallery image pick
+  // Handle gallery image pick — convert to JPEG for Skia compatibility
   const handlePickGallery = useCallback(
     (uri: string, width: number, height: number) => {
       setSelectedImageIndex(-1);
@@ -174,9 +195,7 @@ export default function ReshapeScreen() {
             ? 'Detecting face...'
             : faceContours
               ? `Mesh: ${mesh?.positions.length ?? 0} vertices, ${((mesh?.indices.length ?? 0) / 3) | 0} triangles | Long press for before/after`
-              : status === 'done'
-                ? 'No face found — try another photo'
-                : 'Loading...'}
+              : `Status: ${status} | Faces: ${faces?.length ?? 0} | URI: ${imageUri ? 'yes' : 'no'}${error ? ` | Error: ${error}` : ''}`}
         </Text>
       </View>
 
