@@ -32,7 +32,6 @@ interface SkiaDeformCanvasProps {
 }
 
 const FEATHER_RADIUS = 15;
-const MASK_EXPAND_PX = 25;
 
 /**
  * Load image via fetch → base64 → Skia.
@@ -112,14 +111,26 @@ export function SkiaDeformCanvas({
   );
 
   // Face mask path in display coordinates
+  // Expand generously — 20% of face width ensures deformed vertices
+  // never exceed the mask, even at extreme slider values
+  const maskExpandPx = useMemo(() => {
+    if (faceOval.length < 2) return 40;
+    let minX = Infinity, maxX = -Infinity;
+    for (const p of faceOval) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+    }
+    return Math.max(40, (maxX - minX) * 0.2);
+  }, [faceOval]);
+
   const maskPath = useMemo(() => {
-    const path = buildExpandedFaceOvalPath(faceOval, MASK_EXPAND_PX);
+    const path = buildExpandedFaceOvalPath(faceOval, maskExpandPx);
     const matrix = Skia.Matrix();
     matrix.translate(offsetX, offsetY);
     matrix.scale(scale, scale);
     path.transform(matrix);
     return path;
-  }, [faceOval, scale, offsetX, offsetY]);
+  }, [faceOval, maskExpandPx, scale, offsetX, offsetY]);
 
   // Precompute for worklet
   const originalPositions = mesh.positions;
