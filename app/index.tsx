@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { View, Text, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { View, Text, ActivityIndicator, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFacesInPhoto } from '@infinitered/react-native-mlkit-face-detection';
 import { Asset } from 'expo-asset';
@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { extractFaceContours } from '@/lib/faceDetection';
 import { buildMesh } from '@/lib/meshDeformation';
 import { SkiaDeformCanvas } from '@/components/SkiaDeformCanvas';
+import { SkiaWarpCanvas } from '@/components/SkiaWarpCanvas';
 import { ReshapeSlider } from '@/components/ReshapeSlider';
 import { ReshapeToolStrip } from '@/components/ReshapeToolStrip';
 import { TopBar, TEST_IMAGES } from '@/components/TopBar';
@@ -18,6 +19,7 @@ import { useReshapeStore, RESHAPE_TOOLS } from '@/store/reshapeStore';
 export default function ReshapeScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [useWarpShader, setUseWarpShader] = useState(false);
 
   // Store
   const selectedTool = useReshapeStore((s) => s.selectedTool);
@@ -188,15 +190,28 @@ export default function ReshapeScreen() {
         onResetAll={handleResetAll}
       />
 
-      {/* Status */}
-      <View style={{ paddingHorizontal: 16, height: 24, justifyContent: 'center' }}>
-        <Text style={{ color: '#666666', fontSize: 11 }}>
+      {/* Status + render mode toggle */}
+      <View style={{ flexDirection: 'row', paddingHorizontal: 16, height: 24, alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text style={{ color: '#666666', fontSize: 11, flex: 1 }}>
           {isDetecting
             ? 'Detecting face...'
             : faceContours
-              ? `Mesh: ${mesh?.positions.length ?? 0} vertices, ${((mesh?.indices.length ?? 0) / 3) | 0} triangles | Long press for before/after`
+              ? `${useWarpShader ? 'Shader' : 'Mesh'}: ${mesh?.positions.length ?? 0} pts | Long press for before/after`
               : `Status: ${status} | Faces: ${faces?.length ?? 0} | URI: ${imageUri ? 'yes' : 'no'}${error ? ` | Error: ${error}` : ''}`}
         </Text>
+        <TouchableOpacity
+          onPress={() => setUseWarpShader((v) => !v)}
+          style={{
+            paddingHorizontal: 8,
+            paddingVertical: 2,
+            borderRadius: 8,
+            backgroundColor: useWarpShader ? '#00D2FF' : '#2E2E2E',
+          }}
+        >
+          <Text style={{ color: useWarpShader ? '#000' : '#AAA', fontSize: 10, fontWeight: '600' }}>
+            {useWarpShader ? 'SHADER' : 'MESH'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Canvas */}
@@ -218,8 +233,21 @@ export default function ReshapeScreen() {
               <ActivityIndicator size="large" color="#00D2FF" />
             </View>
           )}
-          {imageUri && mesh && faceContours && (
+          {imageUri && mesh && faceContours && !useWarpShader && (
             <SkiaDeformCanvas
+              imageUri={imageUri}
+              mesh={mesh}
+              canvasWidth={screenWidth}
+              canvasHeight={canvasHeight}
+              imageWidth={imageWidth}
+              imageHeight={imageHeight}
+              faceOval={faceContours.faceOval}
+              sliderValues={svMap}
+              showOriginal={showOriginal}
+            />
+          )}
+          {imageUri && mesh && faceContours && useWarpShader && (
+            <SkiaWarpCanvas
               imageUri={imageUri}
               mesh={mesh}
               canvasWidth={screenWidth}
