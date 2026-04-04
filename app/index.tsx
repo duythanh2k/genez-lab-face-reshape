@@ -3,6 +3,7 @@ import { View, Text, ActivityIndicator, useWindowDimensions } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFacesInPhoto } from '@infinitered/react-native-mlkit-face-detection';
 import { Asset } from 'expo-asset';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useState } from 'react';
@@ -150,11 +151,17 @@ export default function ReshapeScreen() {
     [handleResetAll],
   );
 
-  // Handle gallery image pick — convert to JPEG for Skia compatibility
+  // Handle gallery image pick — convert HEIC to JPEG for Skia compatibility
   const handlePickGallery = useCallback(
-    (uri: string, width: number, height: number) => {
+    async (uri: string, _width: number, _height: number) => {
       setSelectedImageIndex(-1);
-      setImage(uri, width, height);
+      // Convert to JPEG — Skia cannot decode HEIC
+      const result = await ImageManipulator.manipulateAsync(uri, [], {
+        compress: 0.9,
+        format: ImageManipulator.SaveFormat.JPEG,
+      });
+      console.log('[Gallery] converted to JPEG:', result.uri.slice(-30), result.width, 'x', result.height);
+      setImage(result.uri, result.width, result.height);
       faceSlimSV.value = 0;
       eyeEnlargeSV.value = 0;
       noseSlimSV.value = 0;
