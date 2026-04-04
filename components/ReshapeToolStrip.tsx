@@ -1,5 +1,6 @@
 import { memo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, FlatList } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { type ReshapeTool, RESHAPE_TOOLS } from '@/store/reshapeStore';
 
 // --- Colors ---
@@ -12,7 +13,8 @@ const COLORS = {
   border: '#2E2E2E',
 };
 
-const ITEM_WIDTH = 72;
+const ITEM_WIDTH = 68;
+const ICON_SIZE = 20;
 
 // --- Props ---
 
@@ -27,6 +29,7 @@ interface ReshapeToolStripProps {
 interface ToolItemProps {
   tool: ReshapeTool;
   label: string;
+  icon: string;
   isSelected: boolean;
   isModified: boolean;
   onPress: (tool: ReshapeTool) => void;
@@ -35,6 +38,7 @@ interface ToolItemProps {
 const ToolItem = memo(function ToolItem({
   tool,
   label,
+  icon,
   isSelected,
   isModified,
   onPress,
@@ -53,6 +57,11 @@ const ToolItem = memo(function ToolItem({
       accessibilityLabel={label}
       accessibilityState={{ selected: isSelected }}
     >
+      <MaterialCommunityIcons
+        name={icon as any}
+        size={ICON_SIZE}
+        color={color}
+      />
       <Text
         style={[styles.toolLabel, { color }]}
         numberOfLines={1}
@@ -100,6 +109,7 @@ export function ReshapeToolStrip({
       <ToolItem
         tool={item.key}
         label={item.label}
+        icon={item.icon}
         isSelected={selectedTool === item.key}
         isModified={values[item.key] !== 0}
         onPress={onSelectTool}
@@ -138,17 +148,17 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.border,
   },
   listContent: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
   },
   toolItem: {
     width: ITEM_WIDTH,
     height: 64,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 4,
+    gap: 3,
   },
   toolLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '500',
     includeFontPadding: false,
     textAlign: 'center',
@@ -157,6 +167,5 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    marginTop: 5,
   },
 });

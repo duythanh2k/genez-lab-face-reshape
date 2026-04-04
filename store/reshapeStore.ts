@@ -14,17 +14,17 @@ export type ReshapeTool =
   | 'smile'
   | 'forehead';
 
-export const RESHAPE_TOOLS: { key: ReshapeTool; label: string }[] = [
-  { key: 'faceSlim', label: 'Face Slim' },
-  { key: 'jawline', label: 'Jawline' },
-  { key: 'chin', label: 'Chin' },
-  { key: 'forehead', label: 'Forehead' },
-  { key: 'eyeEnlarge', label: 'Eye Size' },
-  { key: 'eyeDistance', label: 'Eye Dist' },
-  { key: 'noseSlim', label: 'Nose Slim' },
-  { key: 'noseLength', label: 'Nose Len' },
-  { key: 'lipFullness', label: 'Lips' },
-  { key: 'smile', label: 'Smile' },
+export const RESHAPE_TOOLS: { key: ReshapeTool; label: string; icon: string }[] = [
+  { key: 'faceSlim', label: 'Face', icon: 'face-man-shimmer' },
+  { key: 'jawline', label: 'Jawline', icon: 'triangle-outline' },
+  { key: 'chin', label: 'Chin', icon: 'arrow-collapse-down' },
+  { key: 'forehead', label: 'Forehead', icon: 'arrow-collapse-up' },
+  { key: 'eyeEnlarge', label: 'Eye Size', icon: 'eye-outline' },
+  { key: 'eyeDistance', label: 'Eye Dist', icon: 'arrow-expand-horizontal' },
+  { key: 'noseSlim', label: 'Nose', icon: 'chevron-double-down' },
+  { key: 'noseLength', label: 'Nose Len', icon: 'arrow-up-down' },
+  { key: 'lipFullness', label: 'Lips', icon: 'lipstick' },
+  { key: 'smile', label: 'Smile', icon: 'emoticon-happy-outline' },
 ];
 
 interface ReshapeState {

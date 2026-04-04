@@ -155,24 +155,39 @@ export function applyChin(
 
 export function applyForehead(
   positions: Point[],
-  foreheadX: number,
+  faceCenterX: number,
   foreheadY: number,
   faceCenterY: number,
+  faceWidth: number,
   intensity: number,
 ): void {
   'worklet';
   if (intensity === 0) return;
 
   // Positive = taller forehead (push up), negative = shorter
-  const maxShift = (faceCenterY - foreheadY) * 0.25 * (intensity / 100);
-  const influenceRadius = Math.abs(faceCenterY - foreheadY) * 0.7;
+  const foreheadHeight = Math.abs(faceCenterY - foreheadY);
+  const maxShift = foreheadHeight * 0.25 * (intensity / 100);
+
+  // Use face center X (not forehead point X) so the effect is symmetric
+  // Influence covers the full forehead width + some vertical range
+  const influenceRadiusX = faceWidth * 0.6;
+  const influenceRadiusY = foreheadHeight * 1.0;
 
   for (let i = 0; i < positions.length; i++) {
     const p = positions[i];
-    const d = dist(p.x, p.y, foreheadX, foreheadY);
-    if (d >= influenceRadius) continue;
+    // Only affect upper half of face
+    if (p.y > faceCenterY) continue;
 
-    const falloff = smoothFalloff(d, influenceRadius);
+    const dx = p.x - faceCenterX;
+    const dy = p.y - foreheadY;
+
+    // Elliptical distance for wider horizontal coverage
+    const normalizedDist = Math.sqrt(
+      (dx / influenceRadiusX) ** 2 + (dy / influenceRadiusY) ** 2,
+    );
+    if (normalizedDist >= 1) continue;
+
+    const falloff = smoothFalloff(normalizedDist, 1);
     positions[i] = { x: p.x, y: p.y - maxShift * falloff };
   }
 }
@@ -432,7 +447,7 @@ export function computeDisplacedPositions(
   applyFaceSlim(positions, landmarkIndices.faceOval, faceCenter.x, faceCenter.y, faceSlim);
   applyJawline(positions, landmarkIndices.faceOval, faceCenter.x, faceCenter.y, jawline);
   applyChin(positions, chinPoint.x, chinPoint.y, faceCenter.y, chin);
-  applyForehead(positions, foreheadPoint.x, foreheadPoint.y, faceCenter.y, forehead);
+  applyForehead(positions, faceCenter.x, foreheadPoint.y, faceCenter.y, faceWidth, forehead);
 
   applyEyeEnlarge(positions, landmarkIndices.leftEye, leftEyeCenter.x, leftEyeCenter.y, eyeEnlarge);
   applyEyeEnlarge(positions, landmarkIndices.rightEye, rightEyeCenter.x, rightEyeCenter.y, eyeEnlarge);
