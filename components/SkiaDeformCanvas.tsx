@@ -9,14 +9,13 @@ import {
   Blur,
   Skia,
   ImageShader,
-  Rect,
 } from '@shopify/react-native-skia';
 import type { SkImage } from '@shopify/react-native-skia';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import type { DeformationMesh } from '@/lib/meshDeformation';
 import { computeDisplacedPositions } from '@/lib/displacements';
 import { buildExpandedFaceOvalPath } from '@/lib/backgroundBlend';
-import type { FaceContours, Point } from '@/lib/types';
+import type { Point } from '@/lib/types';
 
 interface SkiaDeformCanvasProps {
   imageUri: string;
@@ -28,8 +27,6 @@ interface SkiaDeformCanvasProps {
   faceOval: Point[];
   sliderValues: Record<string, SharedValue<number>>;
   showOriginal: SharedValue<boolean>;
-  detectedFaces: FaceContours[];
-  selectedFaceIndex: number;
 }
 
 const FEATHER_RADIUS = 15;
@@ -93,8 +90,6 @@ export function SkiaDeformCanvas({
   faceOval,
   sliderValues: sv,
   showOriginal,
-  detectedFaces,
-  selectedFaceIndex,
 }: SkiaDeformCanvasProps) {
   const image = useSkiaImage(imageUri);
 
@@ -189,28 +184,6 @@ export function SkiaDeformCanvas({
   );
 
   const layerPaint = useMemo(() => Skia.Paint(), []);
-  const dimPaint = useMemo(() => Skia.Paint(), []);
-
-  // Build cutout path for the selected face oval (used in dimming overlay)
-  const selectedCutoutPath = useMemo(() => {
-    if (detectedFaces.length <= 1) return null;
-    const selectedOval = detectedFaces[selectedFaceIndex]?.faceOval;
-    if (!selectedOval || selectedOval.length < 2) return null;
-    // Compute expand px for the selected face
-    let minX = Infinity, maxX = -Infinity;
-    for (const p of selectedOval) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-    }
-    const expandPx = Math.max(60, (maxX - minX) * 0.3);
-    const path = buildExpandedFaceOvalPath(selectedOval, expandPx);
-    const matrix = Skia.Matrix();
-    matrix.translate(offsetX, offsetY);
-    matrix.scale(scale, scale);
-    path.transform(matrix);
-    return path;
-  }, [detectedFaces, selectedFaceIndex, scale, offsetX, offsetY]);
-
   if (!image) return null;
 
   return (
@@ -243,16 +216,6 @@ export function SkiaDeformCanvas({
           </Path>
         </Group>
       </Group>
-
-      {/* Layer 3: Dimming overlay for non-selected faces */}
-      {detectedFaces.length > 1 && selectedCutoutPath && (
-        <Group layer={dimPaint}>
-          <Rect x={0} y={0} width={canvasWidth} height={canvasHeight} color="rgba(0,0,0,0.5)" />
-          <Group blendMode="clear">
-            <Path path={selectedCutoutPath} color="white" />
-          </Group>
-        </Group>
-      )}
     </Canvas>
   );
 }
