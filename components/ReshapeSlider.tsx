@@ -36,8 +36,7 @@ const COLORS = {
 interface ReshapeSliderProps {
   toolName: string;
   value: number;
-  /** SharedValue for 60fps UI-thread updates to Skia */
-  sharedValue: SharedValue<number>;
+  sharedValue?: SharedValue<number>;
   onValueChange: (value: number) => void;
   onReset: () => void;
 }
@@ -112,7 +111,7 @@ export function ReshapeSlider({
       const v = Math.round(min + (newX / tw) * (max - min));
 
       // Pro mode: update shared value directly on UI thread
-      sharedValue.value = v;
+      if (sharedValue) sharedValue.value = v;
 
       // Throttled runOnJS for display label
       const now = Date.now();
@@ -125,7 +124,7 @@ export function ReshapeSlider({
       'worklet';
       const tw = trackWidthShared.value;
       const v = Math.round(min + (thumbX.value / tw) * (max - min));
-      sharedValue.value = v;
+      if (sharedValue) sharedValue.value = v;
       runOnJS(handleValueChange)(v);
     });
 
