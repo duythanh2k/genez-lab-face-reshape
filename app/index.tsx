@@ -13,7 +13,7 @@ import { SkiaDeformCanvas } from '@/components/SkiaDeformCanvas';
 import { ReshapeSlider } from '@/components/ReshapeSlider';
 import { ReshapeToolStrip } from '@/components/ReshapeToolStrip';
 import { TopBar, TEST_IMAGES } from '@/components/TopBar';
-import { useReshapeStore, RESHAPE_TOOLS } from '@/store/reshapeStore';
+import { useReshapeStore, RESHAPE_TOOLS, INITIAL_VALUES, type FaceData } from '@/store/reshapeStore';
 
 export default function ReshapeScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -25,21 +25,17 @@ export default function ReshapeScreen() {
   const imageUri = useReshapeStore((s) => s.imageUri);
   const imageWidth = useReshapeStore((s) => s.imageWidth);
   const imageHeight = useReshapeStore((s) => s.imageHeight);
-  const faceContours = useReshapeStore((s) => s.faceContours);
-  const mesh = useReshapeStore((s) => s.mesh);
+  const faces = useReshapeStore((s) => s.faces);
+  const selectedFaceIndex = useReshapeStore((s) => s.selectedFaceIndex);
   const setSelectedTool = useReshapeStore((s) => s.setSelectedTool);
   const setValue = useReshapeStore((s) => s.setValue);
   const resetTool = useReshapeStore((s) => s.resetTool);
   const resetAll = useReshapeStore((s) => s.resetAll);
   const setImage = useReshapeStore((s) => s.setImage);
-  const setFaceContours = useReshapeStore((s) => s.setFaceContours);
-  const setMesh = useReshapeStore((s) => s.setMesh);
-  const detectedFaces = useReshapeStore((s) => s.detectedFaces);
-  const selectedFaceIndex = useReshapeStore((s) => s.selectedFaceIndex);
-  const setDetectedFaces = useReshapeStore((s) => s.setDetectedFaces);
+  const setFaces = useReshapeStore((s) => s.setFaces);
   const selectFace = useReshapeStore((s) => s.selectFace);
 
-  // Shared values for 60fps Skia updates — one per tool
+  // Shared values for 60fps Skia updates — for the SELECTED face only
   const svMap = {
     faceSlim: useSharedValue(0),
     jawline: useSharedValue(0),
@@ -70,51 +66,52 @@ export default function ReshapeScreen() {
   }, [selectedImageIndex, setImage]);
 
   // Run face detection
-  const { faces, status, error } = useFacesInPhoto(imageUri ?? undefined);
+  const { faces: mlkitFaces, status, error } = useFacesInPhoto(imageUri ?? undefined);
 
-  // Extract contours for ALL faces when detection changes
+  // Build meshes for ALL detected faces at once
   useEffect(() => {
-    if (!faces || faces.length === 0) {
-      setDetectedFaces([]);
-      setFaceContours(null);
-      setMesh(null);
+    if (!mlkitFaces || mlkitFaces.length === 0) {
+      setFaces([]);
       return;
     }
-    const allFaces = extractAllFaceContours(faces);
-    setDetectedFaces(allFaces);
-    console.log(`[FaceDetection] extracted ${allFaces.length} faces`);
-    // Build mesh from the first (largest) face
-    const contours = allFaces[0] ?? null;
-    setFaceContours(contours);
-    if (contours) {
-      setMesh(buildMesh(contours, imageWidth, imageHeight));
-    } else {
-      setMesh(null);
-    }
-  }, [faces, imageWidth, imageHeight, setFaceContours, setMesh, setDetectedFaces]);
+    const allContours = extractAllFaceContours(mlkitFaces);
+    console.log(`[FaceDetection] extracted ${allContours.length} faces`);
 
-  // Rebuild mesh when selected face changes — load saved values into SharedValues
+    // Build a mesh for each face
+    const faceDataArray: FaceData[] = allContours.map((contours) => ({
+      contours,
+      mesh: buildMesh(contours, imageWidth, imageHeight),
+      values: { ...INITIAL_VALUES },
+    }));
+
+    setFaces(faceDataArray);
+  }, [mlkitFaces, imageWidth, imageHeight, setFaces]);
+
+  // When selected face changes, load its values into SharedValues
   useEffect(() => {
-    if (detectedFaces.length === 0) return;
-    const contours = detectedFaces[selectedFaceIndex] ?? null;
-    setFaceContours(contours);
-    if (contours) {
-      setMesh(buildMesh(contours, imageWidth, imageHeight));
-    } else {
-      setMesh(null);
-    }
-    // Load saved values for this face into SharedValues
+    if (faces.length === 0) return;
+    const faceValues = faces[selectedFaceIndex]?.values ?? INITIAL_VALUES;
     for (const key of Object.keys(svMap)) {
-      svMap[key as keyof typeof svMap].value = values[key as keyof typeof svMap] ?? 0;
+      svMap[key as keyof typeof svMap].value = faceValues[key as keyof typeof svMap] ?? 0;
     }
-  }, [selectedFaceIndex]);
+  }, [selectedFaceIndex, faces.length]);
 
-  // Also sync SharedValues when store values change (e.g. from slider)
-  // This is needed because the slider writes to both the store AND the SharedValue,
-  // but when switching faces, only the store values update via selectFace()
-
-  // Canvas height calculation
+  // Canvas height
   const canvasHeight = screenHeight - 44 - 36 - 24 - 56 - 64 - 40;
+
+  // Scale/offset for tap coordinate conversion
+  const imgScale = useMemo(
+    () => Math.min(screenWidth / imageWidth, canvasHeight / imageHeight),
+    [screenWidth, imageWidth, canvasHeight, imageHeight],
+  );
+  const oX = useMemo(
+    () => (screenWidth - imageWidth * imgScale) / 2,
+    [screenWidth, imageWidth, imgScale],
+  );
+  const oY = useMemo(
+    () => (canvasHeight - imageHeight * imgScale) / 2,
+    [canvasHeight, imageHeight, imgScale],
+  );
 
   // Handle tool select
   const handleSelectTool = useCallback(
@@ -124,7 +121,6 @@ export default function ReshapeScreen() {
     [setSelectedTool],
   );
 
-  // Handle slider value change (from throttled runOnJS)
   const handleValueChange = useCallback(
     (value: number) => {
       setValue(selectedTool, value);
@@ -132,19 +128,16 @@ export default function ReshapeScreen() {
     [selectedTool, setValue],
   );
 
-  // Handle reset current tool
   const handleReset = useCallback(() => {
     resetTool(selectedTool);
     activeSharedValue.value = 0;
   }, [selectedTool, resetTool, activeSharedValue]);
 
-  // Handle reset all faces
   const handleResetAll = useCallback(() => {
     resetAll();
     for (const key of Object.keys(svMap)) svMap[key as keyof typeof svMap].value = 0;
   }, [resetAll]);
 
-  // Handle test image select
   const handleSelectTestImage = useCallback(
     (index: number) => {
       setSelectedImageIndex(index);
@@ -153,7 +146,6 @@ export default function ReshapeScreen() {
     [handleResetAll],
   );
 
-  // Handle gallery image pick — convert HEIC to JPEG for Skia compatibility
   const handlePickGallery = useCallback(
     async (uri: string, _width: number, _height: number) => {
       setSelectedImageIndex(-1);
@@ -167,24 +159,18 @@ export default function ReshapeScreen() {
     [setImage],
   );
 
-  // Tap-to-select face — no dimming, just tap to switch
+  // Tap-to-select face
   const handleFaceTap = useCallback(
     (tapX: number, tapY: number) => {
-      if (detectedFaces.length <= 1) return;
-
-      const imgScale = Math.min(screenWidth / imageWidth, canvasHeight / imageHeight);
-      const oX = (screenWidth - imageWidth * imgScale) / 2;
-      const oY = (canvasHeight - imageHeight * imgScale) / 2;
+      if (faces.length <= 1) return;
       const imageX = Math.max(0, Math.min(imageWidth, (tapX - oX) / imgScale));
       const imageY = Math.max(0, Math.min(imageHeight, (tapY - oY) / imgScale));
 
-      for (let i = 0; i < detectedFaces.length; i++) {
-        const bb = detectedFaces[i].boundingBox;
+      for (let i = 0; i < faces.length; i++) {
+        const bb = faces[i].contours.boundingBox;
         if (
-          imageX >= bb.x &&
-          imageX <= bb.x + bb.width &&
-          imageY >= bb.y &&
-          imageY <= bb.y + bb.height
+          imageX >= bb.x && imageX <= bb.x + bb.width &&
+          imageY >= bb.y && imageY <= bb.y + bb.height
         ) {
           if (i !== selectedFaceIndex) {
             selectFace(i);
@@ -193,7 +179,7 @@ export default function ReshapeScreen() {
         }
       }
     },
-    [detectedFaces, selectedFaceIndex, selectFace, screenWidth, imageWidth, imageHeight, canvasHeight],
+    [faces, selectedFaceIndex, selectFace, imageWidth, imageHeight, imgScale, oX, oY],
   );
 
   const tapGesture = Gesture.Tap().onEnd((e) => {
@@ -201,27 +187,18 @@ export default function ReshapeScreen() {
     runOnJS(handleFaceTap)(e.x, e.y);
   });
 
-  // Long press for before/after
   const longPress = Gesture.LongPress()
     .minDuration(200)
-    .onStart(() => {
-      'worklet';
-      showOriginal.value = true;
-    })
-    .onEnd(() => {
-      'worklet';
-      showOriginal.value = false;
-    });
+    .onStart(() => { 'worklet'; showOriginal.value = true; })
+    .onEnd(() => { 'worklet'; showOriginal.value = false; });
 
   const composedGesture = Gesture.Race(tapGesture, longPress);
 
   const isDetecting = status === 'detecting' || status === 'modelLoading';
-  const currentToolLabel =
-    RESHAPE_TOOLS.find((t) => t.key === selectedTool)?.label ?? '';
+  const currentToolLabel = RESHAPE_TOOLS.find((t) => t.key === selectedTool)?.label ?? '';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0D0D0D' }}>
-      {/* Top bar + image chips */}
       <TopBar
         selectedImageIndex={selectedImageIndex}
         onSelectTestImage={handleSelectTestImage}
@@ -229,45 +206,32 @@ export default function ReshapeScreen() {
         onResetAll={handleResetAll}
       />
 
-      {/* Status */}
       <View style={{ paddingHorizontal: 16, height: 24, justifyContent: 'center' }}>
         <Text style={{ color: '#666666', fontSize: 11 }}>
           {isDetecting
             ? 'Detecting face...'
-            : faceContours
-              ? `Face ${selectedFaceIndex + 1}/${detectedFaces.length}${detectedFaces.length > 1 ? ' | Tap face to switch' : ''} | Long press for B/A`
-              : `Status: ${status} | Faces: ${faces?.length ?? 0} | URI: ${imageUri ? 'yes' : 'no'}${error ? ` | Error: ${error}` : ''}`}
+            : faces.length > 0
+              ? `Face ${selectedFaceIndex + 1}/${faces.length}${faces.length > 1 ? ' | Tap face to switch' : ''} | Long press for B/A`
+              : `No face found`}
         </Text>
       </View>
 
-      {/* Canvas — no dimming overlay, just the normal image with deformation */}
       <GestureDetector gesture={composedGesture}>
         <View style={{ flex: 1, backgroundColor: '#0D0D0D' }}>
           {isDetecting && (
-            <View
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                justifyContent: 'center',
-                alignItems: 'center',
-                zIndex: 10,
-              }}
-            >
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
               <ActivityIndicator size="large" color="#00D2FF" />
             </View>
           )}
-          {imageUri && mesh && faceContours && (
+          {imageUri && faces.length > 0 && (
             <SkiaDeformCanvas
               imageUri={imageUri}
-              mesh={mesh}
+              faces={faces}
+              selectedFaceIndex={selectedFaceIndex}
               canvasWidth={screenWidth}
               canvasHeight={canvasHeight}
               imageWidth={imageWidth}
               imageHeight={imageHeight}
-              faceOval={faceContours.faceOval}
               sliderValues={svMap}
               showOriginal={showOriginal}
             />
@@ -275,7 +239,6 @@ export default function ReshapeScreen() {
         </View>
       </GestureDetector>
 
-      {/* Slider */}
       <ReshapeSlider
         toolName={currentToolLabel}
         value={values[selectedTool]}
@@ -284,7 +247,6 @@ export default function ReshapeScreen() {
         onReset={handleReset}
       />
 
-      {/* Tool strip */}
       <ReshapeToolStrip
         selectedTool={selectedTool}
         values={values}

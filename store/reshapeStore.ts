@@ -29,34 +29,7 @@ export const RESHAPE_TOOLS: { key: ReshapeTool; label: string; icon: string }[] 
 
 export type FaceValues = Record<ReshapeTool, number>;
 
-interface ReshapeState {
-  /** Per-face slider values — key is face index */
-  faceValues: Record<number, FaceValues>;
-  /** Current face's values (shortcut for faceValues[selectedFaceIndex]) */
-  values: FaceValues;
-  selectedTool: ReshapeTool;
-  imageUri: string | null;
-  imageWidth: number;
-  imageHeight: number;
-  faceContours: FaceContours | null;
-  mesh: DeformationMesh | null;
-  isDetecting: boolean;
-  detectedFaces: FaceContours[];
-  selectedFaceIndex: number;
-
-  setSelectedTool: (tool: ReshapeTool) => void;
-  setValue: (tool: ReshapeTool, value: number) => void;
-  resetTool: (tool: ReshapeTool) => void;
-  resetAll: () => void;
-  setImage: (uri: string, width: number, height: number) => void;
-  setFaceContours: (contours: FaceContours | null) => void;
-  setMesh: (mesh: DeformationMesh | null) => void;
-  setDetecting: (detecting: boolean) => void;
-  setDetectedFaces: (faces: FaceContours[]) => void;
-  selectFace: (index: number) => void;
-}
-
-const INITIAL_VALUES: FaceValues = {
+export const INITIAL_VALUES: FaceValues = {
   faceSlim: 0,
   jawline: 0,
   chin: 0,
@@ -69,18 +42,47 @@ const INITIAL_VALUES: FaceValues = {
   smile: 0,
 };
 
+/** Data for one detected face */
+export interface FaceData {
+  contours: FaceContours;
+  mesh: DeformationMesh;
+  values: FaceValues;
+}
+
+interface ReshapeState {
+  /** All detected faces with their meshes and per-face values */
+  faces: FaceData[];
+  /** Currently selected face index for slider interaction */
+  selectedFaceIndex: number;
+  /** Current face's values (shortcut) */
+  values: FaceValues;
+  selectedTool: ReshapeTool;
+  imageUri: string | null;
+  imageWidth: number;
+  imageHeight: number;
+  isDetecting: boolean;
+
+  setSelectedTool: (tool: ReshapeTool) => void;
+  setValue: (tool: ReshapeTool, value: number) => void;
+  resetTool: (tool: ReshapeTool) => void;
+  resetAll: () => void;
+  setImage: (uri: string, width: number, height: number) => void;
+  setDetecting: (detecting: boolean) => void;
+  /** Set all detected faces (builds meshes externally, passed in) */
+  setFaces: (faces: FaceData[]) => void;
+  /** Switch to a different face — loads its saved values */
+  selectFace: (index: number) => void;
+}
+
 export const useReshapeStore = create<ReshapeState>((set) => ({
-  faceValues: {},
+  faces: [],
+  selectedFaceIndex: 0,
   values: { ...INITIAL_VALUES },
   selectedTool: 'faceSlim',
   imageUri: null,
   imageWidth: 1,
   imageHeight: 1,
-  faceContours: null,
-  mesh: null,
   isDetecting: false,
-  detectedFaces: [],
-  selectedFaceIndex: 0,
 
   setSelectedTool: (tool) => set({ selectedTool: tool }),
 
@@ -88,47 +90,59 @@ export const useReshapeStore = create<ReshapeState>((set) => ({
   setValue: (tool, value) =>
     set((state) => {
       const newValues = { ...state.values, [tool]: Math.round(value) };
-      return {
-        values: newValues,
-        faceValues: { ...state.faceValues, [state.selectedFaceIndex]: newValues },
-      };
+      const newFaces = [...state.faces];
+      if (newFaces[state.selectedFaceIndex]) {
+        newFaces[state.selectedFaceIndex] = {
+          ...newFaces[state.selectedFaceIndex],
+          values: newValues,
+        };
+      }
+      return { values: newValues, faces: newFaces };
     }),
 
   resetTool: (tool) =>
     set((state) => {
       const newValues = { ...state.values, [tool]: 0 };
-      return {
-        values: newValues,
-        faceValues: { ...state.faceValues, [state.selectedFaceIndex]: newValues },
-      };
+      const newFaces = [...state.faces];
+      if (newFaces[state.selectedFaceIndex]) {
+        newFaces[state.selectedFaceIndex] = {
+          ...newFaces[state.selectedFaceIndex],
+          values: newValues,
+        };
+      }
+      return { values: newValues, faces: newFaces };
     }),
 
   // Reset ALL faces
   resetAll: () =>
-    set({ values: { ...INITIAL_VALUES }, faceValues: {} }),
+    set((state) => ({
+      values: { ...INITIAL_VALUES },
+      faces: state.faces.map((f) => ({ ...f, values: { ...INITIAL_VALUES } })),
+    })),
 
   setImage: (uri, width, height) =>
     set({
       imageUri: uri,
       imageWidth: width,
       imageHeight: height,
-      faceContours: null,
-      mesh: null,
-      values: { ...INITIAL_VALUES },
-      faceValues: {},
-      detectedFaces: [],
+      faces: [],
       selectedFaceIndex: 0,
+      values: { ...INITIAL_VALUES },
     }),
 
-  setFaceContours: (contours) => set({ faceContours: contours }),
-  setMesh: (mesh) => set({ mesh }),
   setDetecting: (detecting) => set({ isDetecting: detecting }),
-  setDetectedFaces: (faces) => set({ detectedFaces: faces }),
 
-  // Switch face — load saved values for that face (or zeros if never edited)
+  setFaces: (faces) =>
+    set({
+      faces,
+      selectedFaceIndex: 0,
+      values: faces[0]?.values ?? { ...INITIAL_VALUES },
+    }),
+
+  // Switch face — load that face's saved values
   selectFace: (index) =>
     set((state) => ({
       selectedFaceIndex: index,
-      values: state.faceValues[index] ?? { ...INITIAL_VALUES },
+      values: state.faces[index]?.values ?? { ...INITIAL_VALUES },
     })),
 }));
