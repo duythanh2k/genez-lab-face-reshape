@@ -149,6 +149,15 @@ export function SkiaDeformCanvas({
       return [];
     }
 
+    // If all slider values are zero, return original positions
+    // (renders identically to base image — no mesh artifacts)
+    if (sv.faceSlim.value === 0 && sv.jawline.value === 0 && sv.chin.value === 0 &&
+        sv.forehead.value === 0 && sv.eyeEnlarge.value === 0 && sv.eyeDistance.value === 0 &&
+        sv.noseSlim.value === 0 && sv.noseLength.value === 0 && sv.lipFullness.value === 0 &&
+        sv.smile.value === 0) {
+      return selPositions.map((p: Point) => vec(p.x * scale + offsetX, p.y * scale + offsetY));
+    }
+
     const displaced = computeDisplacedPositions(
       selPositions,
       selLandmarks,
@@ -206,12 +215,8 @@ export function SkiaDeformCanvas({
 
   if (!image) return null;
 
-  const hasSelectedEdits = selectedFace && (
-    sv.faceSlim.value !== 0 || sv.jawline.value !== 0 || sv.chin.value !== 0 ||
-    sv.forehead.value !== 0 || sv.eyeEnlarge.value !== 0 || sv.eyeDistance.value !== 0 ||
-    sv.noseSlim.value !== 0 || sv.noseLength.value !== 0 || sv.lipFullness.value !== 0 ||
-    sv.smile.value !== 0 || hasEdits(selectedFace.values)
-  );
+  // Always render selected face, but return original positions when no edits
+  // to avoid mesh artifacts. The Vertices renders identically to the base image.
 
   return (
     <Canvas style={{ width: canvasWidth, height: canvasHeight }}>
