@@ -94,12 +94,19 @@ export function buildMesh(
   addContour(contours.lowerLipTop, landmarkIndices.lowerLipTop);
   addContour(contours.lowerLipBottom, landmarkIndices.lowerLipBottom);
 
-  // 2. Add background grid points (spaced ~40px apart, capping mesh size)
-  const gridSpacing = Math.max(40, Math.min(imageWidth, imageHeight) / 25);
-  for (let y = gridSpacing / 2; y < imageHeight; y += gridSpacing) {
-    for (let x = gridSpacing / 2; x < imageWidth; x += gridSpacing) {
-      // Skip points that are too close to existing contour points
-      // to avoid degenerate triangles
+  // 2. Add grid points AROUND the face area only (not entire image).
+  // The face mask clips everything outside the face oval, so grid points
+  // far from the face are unnecessary and cause bad triangulation.
+  const bb = contours.boundingBox;
+  const padding = Math.max(bb.width, bb.height) * 0.5;
+  const gridMinX = Math.max(0, bb.x - padding);
+  const gridMinY = Math.max(0, bb.y - padding);
+  const gridMaxX = Math.min(imageWidth, bb.x + bb.width + padding);
+  const gridMaxY = Math.min(imageHeight, bb.y + bb.height + padding);
+  const gridSpacing = Math.max(20, Math.min(bb.width, bb.height) / 10);
+
+  for (let y = gridMinY; y <= gridMaxY; y += gridSpacing) {
+    for (let x = gridMinX; x <= gridMaxX; x += gridSpacing) {
       let tooClose = false;
       for (const p of positions) {
         const dx = p.x - x;
@@ -115,19 +122,30 @@ export function buildMesh(
     }
   }
 
-  // 3. Add image corner and edge midpoints for full coverage
+  // 3. Add corners of the grid area for full mesh coverage
   const corners: Point[] = [
-    { x: 0, y: 0 },
-    { x: imageWidth, y: 0 },
-    { x: imageWidth, y: imageHeight },
-    { x: 0, y: imageHeight },
-    { x: imageWidth / 2, y: 0 },
-    { x: imageWidth, y: imageHeight / 2 },
-    { x: imageWidth / 2, y: imageHeight },
-    { x: 0, y: imageHeight / 2 },
+    { x: gridMinX, y: gridMinY },
+    { x: gridMaxX, y: gridMinY },
+    { x: gridMaxX, y: gridMaxY },
+    { x: gridMinX, y: gridMaxY },
+    { x: (gridMinX + gridMaxX) / 2, y: gridMinY },
+    { x: gridMaxX, y: (gridMinY + gridMaxY) / 2 },
+    { x: (gridMinX + gridMaxX) / 2, y: gridMaxY },
+    { x: gridMinX, y: (gridMinY + gridMaxY) / 2 },
   ];
   for (const c of corners) {
-    positions.push(c);
+    let tooClose = false;
+    for (const p of positions) {
+      const dx = p.x - c.x;
+      const dy = p.y - c.y;
+      if (dx * dx + dy * dy < (gridSpacing * 0.3) ** 2) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (!tooClose) {
+      positions.push(c);
+    }
   }
 
   // 4. Run Delaunay triangulation
