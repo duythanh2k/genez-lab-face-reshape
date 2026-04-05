@@ -7,24 +7,29 @@ import {
   Skia,
   ImageShader,
 } from '@shopify/react-native-skia';
-import type { SkImage, SkPoint } from '@shopify/react-native-skia';
+import type { SkImage } from '@shopify/react-native-skia';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import { computeDisplacedPositions } from '@/lib/displacements';
 import type { Point } from '@/lib/types';
-import type { FaceData, FaceValues } from '@/store/reshapeStore';
+import type { MultiFaceMesh } from '@/lib/meshDeformation';
+import type { FaceValues } from '@/store/reshapeStore';
 
 interface SkiaDeformCanvasProps {
   imageUri: string;
-  faces: FaceData[];
+  /** Single mesh containing ALL faces */
+  mesh: MultiFaceMesh;
+  /** Per-face saved values (for non-selected faces) */
+  allFaceValues: FaceValues[];
+  /** Which face the slider is controlling */
   selectedFaceIndex: number;
   canvasWidth: number;
   canvasHeight: number;
   imageWidth: number;
   imageHeight: number;
+  /** SharedValues for the selected face's sliders (60fps) */
   sliderValues: Record<string, SharedValue<number>>;
   showOriginal: SharedValue<boolean>;
 }
-
 
 function useSkiaImage(uri: string | null): SkImage | null {
   const [image, setImage] = useState<SkImage | null>(null);
@@ -50,42 +55,10 @@ function useSkiaImage(uri: string | null): SkImage | null {
   return image;
 }
 
-/** Check if any value in FaceValues is non-zero */
-function hasEdits(v: FaceValues): boolean {
-  return Object.values(v).some((val) => val !== 0);
-}
-
-/** Compute displaced positions for a face (JS thread, static) */
-function computeStaticVertices(
-  face: FaceData,
-  scale: number,
-  offsetX: number,
-  offsetY: number,
-): SkPoint[] {
-  const { mesh, values } = face;
-  if (!hasEdits(values)) return [];
-
-  const displaced = computeDisplacedPositions(
-    mesh.positions,
-    mesh.landmarkIndices,
-    mesh.faceCenter,
-    mesh.leftEyeCenter,
-    mesh.rightEyeCenter,
-    mesh.noseCenterX,
-    mesh.lipCenter,
-    mesh.chinPoint,
-    mesh.foreheadPoint,
-    values.faceSlim, values.jawline, values.chin, values.forehead,
-    values.eyeEnlarge, values.eyeDistance, values.noseSlim, values.noseLength,
-    values.lipFullness, values.smile,
-  );
-
-  return displaced.map((p) => vec(p.x * scale + offsetX, p.y * scale + offsetY));
-}
-
 export function SkiaDeformCanvas({
   imageUri,
-  faces,
+  mesh,
+  allFaceValues,
   selectedFaceIndex,
   canvasWidth,
   canvasHeight,
@@ -102,124 +75,96 @@ export function SkiaDeformCanvas({
   const displayWidth = imageWidth * scale;
   const displayHeight = imageHeight * scale;
 
-  // Selected face data
-  const selectedFace = faces[selectedFaceIndex];
+  // Texture coords (stable — mesh doesn't change)
+  const texturePoints = useMemo(
+    () => mesh.texCoords.map((t) => vec(t.x * imageWidth, t.y * imageHeight)),
+    [mesh.texCoords, imageWidth, imageHeight],
+  );
 
-  // Texture coords for selected face
-  const selectedTexturePoints = useMemo(() => {
-    if (!selectedFace) return [];
-    return selectedFace.mesh.texCoords.map((t) => vec(t.x * imageWidth, t.y * imageHeight));
-  }, [selectedFace?.mesh.texCoords, imageWidth, imageHeight]);
+  // Precompute mesh data for the worklet
+  const positions = mesh.positions;
+  const facesData = mesh.facesData;
 
-
-  // Selected face: displaced vertices via useDerivedValue (60fps from SharedValues)
-  const selectedMesh = selectedFace?.mesh;
-  const selPositions = selectedMesh?.positions ?? [];
-  const selLandmarks = selectedMesh?.landmarkIndices;
-  const selFaceCenter = selectedMesh?.faceCenter ?? { x: 0, y: 0 };
-  const selLeftEye = selectedMesh?.leftEyeCenter ?? { x: 0, y: 0 };
-  const selRightEye = selectedMesh?.rightEyeCenter ?? { x: 0, y: 0 };
-  const selNoseCX = selectedMesh?.noseCenterX ?? 0;
-  const selLipCenter = selectedMesh?.lipCenter ?? { x: 0, y: 0 };
-  const selChin = selectedMesh?.chinPoint ?? { x: 0, y: 0 };
-  const selForehead = selectedMesh?.foreheadPoint ?? { x: 0, y: 0 };
-
-  const selectedVertices = useDerivedValue(() => {
-    if (showOriginal.value || !selLandmarks || selPositions.length === 0) {
-      return [];
+  // Compute displaced positions for ALL faces in a single pass
+  // Selected face uses SharedValues (60fps), others use saved store values
+  const displayVertices = useDerivedValue(() => {
+    if (showOriginal.value) {
+      return positions.map((p: Point) =>
+        vec(p.x * scale + offsetX, p.y * scale + offsetY),
+      );
     }
 
-    // If all slider values are zero, return original positions
-    // (renders identically to base image — no mesh artifacts)
-    if (sv.faceSlim.value === 0 && sv.jawline.value === 0 && sv.chin.value === 0 &&
-        sv.forehead.value === 0 && sv.eyeEnlarge.value === 0 && sv.eyeDistance.value === 0 &&
-        sv.noseSlim.value === 0 && sv.noseLength.value === 0 && sv.lipFullness.value === 0 &&
-        sv.smile.value === 0) {
-      return selPositions.map((p: Point) => vec(p.x * scale + offsetX, p.y * scale + offsetY));
+    // Start with original positions (deep copy)
+    const displaced: Point[] = new Array(positions.length);
+    for (let i = 0; i < positions.length; i++) {
+      displaced[i] = { x: positions[i].x, y: positions[i].y };
     }
 
-    const displaced = computeDisplacedPositions(
-      selPositions,
-      selLandmarks,
-      selFaceCenter,
-      selLeftEye,
-      selRightEye,
-      selNoseCX,
-      selLipCenter,
-      selChin,
-      selForehead,
-      sv.faceSlim.value, sv.jawline.value, sv.chin.value, sv.forehead.value,
-      sv.eyeEnlarge.value, sv.eyeDistance.value, sv.noseSlim.value, sv.noseLength.value,
-      sv.lipFullness.value, sv.smile.value,
+    // Apply displacements for EACH face
+    for (let fi = 0; fi < facesData.length; fi++) {
+      const fd = facesData[fi];
+      const isSelected = fi === selectedFaceIndex;
+
+      // Get values: SharedValues for selected, saved for others
+      const faceSlim = isSelected ? sv.faceSlim.value : (allFaceValues[fi]?.faceSlim ?? 0);
+      const jawline = isSelected ? sv.jawline.value : (allFaceValues[fi]?.jawline ?? 0);
+      const chin = isSelected ? sv.chin.value : (allFaceValues[fi]?.chin ?? 0);
+      const forehead = isSelected ? sv.forehead.value : (allFaceValues[fi]?.forehead ?? 0);
+      const eyeEnlarge = isSelected ? sv.eyeEnlarge.value : (allFaceValues[fi]?.eyeEnlarge ?? 0);
+      const eyeDistance = isSelected ? sv.eyeDistance.value : (allFaceValues[fi]?.eyeDistance ?? 0);
+      const noseSlim = isSelected ? sv.noseSlim.value : (allFaceValues[fi]?.noseSlim ?? 0);
+      const noseLength = isSelected ? sv.noseLength.value : (allFaceValues[fi]?.noseLength ?? 0);
+      const lipFullness = isSelected ? sv.lipFullness.value : (allFaceValues[fi]?.lipFullness ?? 0);
+      const smile = isSelected ? sv.smile.value : (allFaceValues[fi]?.smile ?? 0);
+
+      // Skip if all zero
+      if (faceSlim === 0 && jawline === 0 && chin === 0 && forehead === 0 &&
+          eyeEnlarge === 0 && eyeDistance === 0 && noseSlim === 0 &&
+          noseLength === 0 && lipFullness === 0 && smile === 0) {
+        continue;
+      }
+
+      // Apply this face's displacements to the shared positions array
+      // computeDisplacedPositions modifies in place via the displacement functions
+      const faceDisplaced = computeDisplacedPositions(
+        displaced, // Use current state (accumulates from previous faces)
+        fd.landmarkIndices,
+        fd.faceCenter,
+        fd.leftEyeCenter,
+        fd.rightEyeCenter,
+        fd.noseCenterX,
+        fd.lipCenter,
+        fd.chinPoint,
+        fd.foreheadPoint,
+        faceSlim, jawline, chin, forehead,
+        eyeEnlarge, eyeDistance, noseSlim, noseLength,
+        lipFullness, smile,
+      );
+
+      // Copy results back
+      for (let i = 0; i < faceDisplaced.length; i++) {
+        displaced[i] = faceDisplaced[i];
+      }
+    }
+
+    return displaced.map((p: Point) =>
+      vec(p.x * scale + offsetX, p.y * scale + offsetY),
     );
-
-    return displaced.map((p: Point) => vec(p.x * scale + offsetX, p.y * scale + offsetY));
   }, [sv.faceSlim, sv.jawline, sv.chin, sv.forehead, sv.eyeEnlarge, sv.eyeDistance, sv.noseSlim, sv.noseLength, sv.lipFullness, sv.smile, showOriginal]);
-
-  // Non-selected faces: compute static vertices from saved values (JS thread)
-  const otherFaceLayers = useMemo(() => {
-    return faces
-      .map((face, i) => {
-        if (i === selectedFaceIndex) return null; // Selected face rendered separately
-        if (!hasEdits(face.values)) return null; // No edits, skip
-
-        const vertices = computeStaticVertices(face, scale, offsetX, offsetY);
-        if (vertices.length === 0) return null;
-
-        const textures = face.mesh.texCoords.map((t) => vec(t.x * imageWidth, t.y * imageHeight));
-
-        return { vertices, textures, indices: face.mesh.indices, key: i };
-      })
-      .filter(Boolean) as Array<{
-        vertices: SkPoint[];
-        textures: SkPoint[];
-        indices: number[];
-        key: number;
-      }>;
-  }, [faces, selectedFaceIndex, scale, offsetX, offsetY, imageWidth, imageHeight]);
 
   if (!image) return null;
 
-  // Always render selected face, but return original positions when no edits
-  // to avoid mesh artifacts. The Vertices renders identically to the base image.
-
   return (
     <Canvas style={{ width: canvasWidth, height: canvasHeight }}>
-      {/* Background: original image */}
-      <SkiaImage
-        image={image}
-        x={offsetX}
-        y={offsetY}
-        width={displayWidth}
-        height={displayHeight}
-        fit="fill"
-      />
-
-      {/* Non-selected faces: static deformation (from saved values) */}
-      {/* No mask — smooth falloff in displacement functions prevents background warping */}
-      {otherFaceLayers.map((layer) => (
-        <Vertices
-          key={layer.key}
-          vertices={layer.vertices}
-          textures={layer.textures}
-          indices={layer.indices}
-          mode="triangles"
-        >
-          <ImageShader image={image} tx="clamp" ty="clamp" />
-        </Vertices>
-      ))}
-
-      {/* Selected face: live deformation from SharedValues (60fps) */}
-      {selectedFace && (
-        <Vertices
-          vertices={selectedVertices}
-          textures={selectedTexturePoints}
-          indices={selectedFace.mesh.indices}
-          mode="triangles"
-        >
-          <ImageShader image={image} tx="clamp" ty="clamp" />
-        </Vertices>
-      )}
+      {/* Single Vertices covering the entire image — all faces' deformations applied */}
+      <Vertices
+        vertices={displayVertices}
+        textures={texturePoints}
+        indices={mesh.indices}
+        mode="triangles"
+      >
+        <ImageShader image={image} tx="clamp" ty="clamp" />
+      </Vertices>
     </Canvas>
   );
 }

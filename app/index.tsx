@@ -8,12 +8,12 @@ import { useSharedValue, runOnJS } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useState } from 'react';
 import { extractAllFaceContours } from '@/lib/faceDetection';
-import { buildMesh } from '@/lib/meshDeformation';
+import { buildMultiFaceMesh } from '@/lib/meshDeformation';
 import { SkiaDeformCanvas } from '@/components/SkiaDeformCanvas';
 import { ReshapeSlider } from '@/components/ReshapeSlider';
 import { ReshapeToolStrip } from '@/components/ReshapeToolStrip';
 import { TopBar, TEST_IMAGES } from '@/components/TopBar';
-import { useReshapeStore, RESHAPE_TOOLS, INITIAL_VALUES, type FaceData } from '@/store/reshapeStore';
+import { useReshapeStore, RESHAPE_TOOLS } from '@/store/reshapeStore';
 
 export default function ReshapeScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -22,20 +22,23 @@ export default function ReshapeScreen() {
   // Store
   const selectedTool = useReshapeStore((s) => s.selectedTool);
   const values = useReshapeStore((s) => s.values);
+  const allFaceValues = useReshapeStore((s) => s.allFaceValues);
   const imageUri = useReshapeStore((s) => s.imageUri);
   const imageWidth = useReshapeStore((s) => s.imageWidth);
   const imageHeight = useReshapeStore((s) => s.imageHeight);
-  const faces = useReshapeStore((s) => s.faces);
+  const mesh = useReshapeStore((s) => s.mesh);
+  const detectedFaces = useReshapeStore((s) => s.detectedFaces);
   const selectedFaceIndex = useReshapeStore((s) => s.selectedFaceIndex);
+  const faceCount = useReshapeStore((s) => s.faceCount);
   const setSelectedTool = useReshapeStore((s) => s.setSelectedTool);
   const setValue = useReshapeStore((s) => s.setValue);
   const resetTool = useReshapeStore((s) => s.resetTool);
   const resetAll = useReshapeStore((s) => s.resetAll);
   const setImage = useReshapeStore((s) => s.setImage);
-  const setFaces = useReshapeStore((s) => s.setFaces);
+  const setDetection = useReshapeStore((s) => s.setDetection);
   const selectFace = useReshapeStore((s) => s.selectFace);
 
-  // Shared values for 60fps Skia updates — for the SELECTED face only
+  // Shared values for 60fps Skia — selected face only
   const svMap = {
     faceSlim: useSharedValue(0),
     jawline: useSharedValue(0),
@@ -49,10 +52,9 @@ export default function ReshapeScreen() {
     smile: useSharedValue(0),
   };
   const showOriginal = useSharedValue(false);
-
   const activeSharedValue = svMap[selectedTool];
 
-  // Resolve bundled asset to local JPEG URI
+  // Load bundled image
   useEffect(() => {
     if (selectedImageIndex < 0) return;
     (async () => {
@@ -65,68 +67,43 @@ export default function ReshapeScreen() {
     })();
   }, [selectedImageIndex, setImage]);
 
-  // Run face detection
-  const { faces: mlkitFaces, status, error } = useFacesInPhoto(imageUri ?? undefined);
+  // Face detection
+  const { faces: mlkitFaces, status } = useFacesInPhoto(imageUri ?? undefined);
 
-  // Build meshes for ALL detected faces at once
+  // Build ONE mesh with ALL faces when detection completes
   useEffect(() => {
     if (!mlkitFaces || mlkitFaces.length === 0) {
-      setFaces([]);
+      setDetection([], null as any);
       return;
     }
     const allContours = extractAllFaceContours(mlkitFaces);
-    console.log(`[FaceDetection] extracted ${allContours.length} faces`);
+    console.log(`[FaceDetection] ${allContours.length} faces, building multi-face mesh`);
+    const multiFaceMesh = buildMultiFaceMesh(allContours, imageWidth, imageHeight);
+    console.log(`[FaceDetection] mesh: ${multiFaceMesh.positions.length} vertices, ${multiFaceMesh.indices.length / 3} triangles`);
+    setDetection(allContours, multiFaceMesh);
+  }, [mlkitFaces, imageWidth, imageHeight, setDetection]);
 
-    // Build a mesh for each face
-    const faceDataArray: FaceData[] = allContours.map((contours) => ({
-      contours,
-      mesh: buildMesh(contours, imageWidth, imageHeight),
-      values: { ...INITIAL_VALUES },
-    }));
-
-    setFaces(faceDataArray);
-  }, [mlkitFaces, imageWidth, imageHeight, setFaces]);
-
-  // When selected face changes, load its values into SharedValues
+  // Load saved values into SharedValues when face changes
   useEffect(() => {
-    if (faces.length === 0) return;
-    const faceValues = faces[selectedFaceIndex]?.values ?? INITIAL_VALUES;
     for (const key of Object.keys(svMap)) {
-      svMap[key as keyof typeof svMap].value = faceValues[key as keyof typeof svMap] ?? 0;
+      svMap[key as keyof typeof svMap].value = values[key as keyof typeof svMap] ?? 0;
     }
-  }, [selectedFaceIndex, faces.length]);
+  }, [selectedFaceIndex]);
 
-  // Canvas height
   const canvasHeight = screenHeight - 44 - 36 - 24 - 56 - 64 - 40;
 
-  // Scale/offset for tap coordinate conversion
-  const imgScale = useMemo(
-    () => Math.min(screenWidth / imageWidth, canvasHeight / imageHeight),
-    [screenWidth, imageWidth, canvasHeight, imageHeight],
-  );
-  const oX = useMemo(
-    () => (screenWidth - imageWidth * imgScale) / 2,
-    [screenWidth, imageWidth, imgScale],
-  );
-  const oY = useMemo(
-    () => (canvasHeight - imageHeight * imgScale) / 2,
-    [canvasHeight, imageHeight, imgScale],
-  );
+  // Coordinate transform for tap
+  const imgScale = Math.min(screenWidth / imageWidth, canvasHeight / imageHeight);
+  const oX = (screenWidth - imageWidth * imgScale) / 2;
+  const oY = (canvasHeight - imageHeight * imgScale) / 2;
 
-  // Handle tool select
-  const handleSelectTool = useCallback(
-    (tool: (typeof RESHAPE_TOOLS)[number]['key']) => {
-      setSelectedTool(tool);
-    },
-    [setSelectedTool],
-  );
+  const handleSelectTool = useCallback((tool: (typeof RESHAPE_TOOLS)[number]['key']) => {
+    setSelectedTool(tool);
+  }, [setSelectedTool]);
 
-  const handleValueChange = useCallback(
-    (value: number) => {
-      setValue(selectedTool, value);
-    },
-    [selectedTool, setValue],
-  );
+  const handleValueChange = useCallback((value: number) => {
+    setValue(selectedTool, value);
+  }, [selectedTool, setValue]);
 
   const handleReset = useCallback(() => {
     resetTool(selectedTool);
@@ -138,60 +115,42 @@ export default function ReshapeScreen() {
     for (const key of Object.keys(svMap)) svMap[key as keyof typeof svMap].value = 0;
   }, [resetAll]);
 
-  const handleSelectTestImage = useCallback(
-    (index: number) => {
-      setSelectedImageIndex(index);
-      handleResetAll();
-    },
-    [handleResetAll],
-  );
+  const handleSelectTestImage = useCallback((index: number) => {
+    setSelectedImageIndex(index);
+    handleResetAll();
+  }, [handleResetAll]);
 
-  const handlePickGallery = useCallback(
-    async (uri: string, _width: number, _height: number) => {
-      setSelectedImageIndex(-1);
-      const result = await ImageManipulator.manipulateAsync(uri, [], {
-        compress: 0.9,
-        format: ImageManipulator.SaveFormat.JPEG,
-      });
-      setImage(result.uri, result.width, result.height);
-      for (const key of Object.keys(svMap)) svMap[key as keyof typeof svMap].value = 0;
-    },
-    [setImage],
-  );
+  const handlePickGallery = useCallback(async (uri: string, _w: number, _h: number) => {
+    setSelectedImageIndex(-1);
+    const result = await ImageManipulator.manipulateAsync(uri, [], {
+      compress: 0.9, format: ImageManipulator.SaveFormat.JPEG,
+    });
+    setImage(result.uri, result.width, result.height);
+    for (const key of Object.keys(svMap)) svMap[key as keyof typeof svMap].value = 0;
+  }, [setImage]);
 
-  // Tap-to-select face
-  const handleFaceTap = useCallback(
-    (tapX: number, tapY: number) => {
-      if (faces.length <= 1) return;
-      const imageX = Math.max(0, Math.min(imageWidth, (tapX - oX) / imgScale));
-      const imageY = Math.max(0, Math.min(imageHeight, (tapY - oY) / imgScale));
-
-      for (let i = 0; i < faces.length; i++) {
-        const bb = faces[i].contours.boundingBox;
-        if (
-          imageX >= bb.x && imageX <= bb.x + bb.width &&
-          imageY >= bb.y && imageY <= bb.y + bb.height
-        ) {
-          if (i !== selectedFaceIndex) {
-            selectFace(i);
-          }
-          return;
-        }
+  // Tap to select face
+  const handleFaceTap = useCallback((tapX: number, tapY: number) => {
+    if (faceCount <= 1) return;
+    const imageX = Math.max(0, Math.min(imageWidth, (tapX - oX) / imgScale));
+    const imageY = Math.max(0, Math.min(imageHeight, (tapY - oY) / imgScale));
+    for (let i = 0; i < detectedFaces.length; i++) {
+      const bb = detectedFaces[i].boundingBox;
+      if (imageX >= bb.x && imageX <= bb.x + bb.width &&
+          imageY >= bb.y && imageY <= bb.y + bb.height) {
+        if (i !== selectedFaceIndex) selectFace(i);
+        return;
       }
-    },
-    [faces, selectedFaceIndex, selectFace, imageWidth, imageHeight, imgScale, oX, oY],
-  );
+    }
+  }, [detectedFaces, selectedFaceIndex, selectFace, imageWidth, imageHeight, imgScale, oX, oY, faceCount]);
 
   const tapGesture = Gesture.Tap().onEnd((e) => {
     'worklet';
     runOnJS(handleFaceTap)(e.x, e.y);
   });
-
-  const longPress = Gesture.LongPress()
-    .minDuration(200)
+  const longPress = Gesture.LongPress().minDuration(200)
     .onStart(() => { 'worklet'; showOriginal.value = true; })
     .onEnd(() => { 'worklet'; showOriginal.value = false; });
-
   const composedGesture = Gesture.Race(tapGesture, longPress);
 
   const isDetecting = status === 'detecting' || status === 'modelLoading';
@@ -208,11 +167,9 @@ export default function ReshapeScreen() {
 
       <View style={{ paddingHorizontal: 16, height: 24, justifyContent: 'center' }}>
         <Text style={{ color: '#666666', fontSize: 11 }}>
-          {isDetecting
-            ? 'Detecting face...'
-            : faces.length > 0
-              ? `Face ${selectedFaceIndex + 1}/${faces.length}${faces.length > 1 ? ' | Tap face to switch' : ''} | Long press for B/A`
-              : `No face found`}
+          {isDetecting ? 'Detecting face...'
+            : mesh ? `Face ${selectedFaceIndex + 1}/${faceCount}${faceCount > 1 ? ' | Tap face to switch' : ''} | Long press for B/A`
+            : 'No face found'}
         </Text>
       </View>
 
@@ -223,10 +180,11 @@ export default function ReshapeScreen() {
               <ActivityIndicator size="large" color="#00D2FF" />
             </View>
           )}
-          {imageUri && faces.length > 0 && (
+          {imageUri && mesh && (
             <SkiaDeformCanvas
               imageUri={imageUri}
-              faces={faces}
+              mesh={mesh}
+              allFaceValues={allFaceValues}
               selectedFaceIndex={selectedFaceIndex}
               canvasWidth={screenWidth}
               canvasHeight={canvasHeight}
