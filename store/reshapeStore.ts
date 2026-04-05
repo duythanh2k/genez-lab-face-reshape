@@ -36,6 +36,8 @@ interface ReshapeState {
   faceContours: FaceContours | null;
   mesh: DeformationMesh | null;
   isDetecting: boolean;
+  detectedFaces: FaceContours[];
+  selectedFaceIndex: number;
 
   setSelectedTool: (tool: ReshapeTool) => void;
   setValue: (tool: ReshapeTool, value: number) => void;
@@ -45,6 +47,8 @@ interface ReshapeState {
   setFaceContours: (contours: FaceContours | null) => void;
   setMesh: (mesh: DeformationMesh | null) => void;
   setDetecting: (detecting: boolean) => void;
+  setDetectedFaces: (faces: FaceContours[]) => void;
+  selectFace: (index: number) => void;
 }
 
 const INITIAL_VALUES: Record<ReshapeTool, number> = {
@@ -69,6 +73,8 @@ export const useReshapeStore = create<ReshapeState>((set) => ({
   faceContours: null,
   mesh: null,
   isDetecting: false,
+  detectedFaces: [],
+  selectedFaceIndex: 0,
 
   setSelectedTool: (tool) => set({ selectedTool: tool }),
 
@@ -92,9 +98,14 @@ export const useReshapeStore = create<ReshapeState>((set) => ({
       faceContours: null,
       mesh: null,
       values: { ...INITIAL_VALUES },
+      detectedFaces: [],
+      selectedFaceIndex: 0,
     }),
 
   setFaceContours: (contours) => set({ faceContours: contours }),
   setMesh: (mesh) => set({ mesh }),
   setDetecting: (detecting) => set({ isDetecting: detecting }),
+  setDetectedFaces: (faces) => set({ detectedFaces: faces }),
+  selectFace: (index) =>
+    set({ selectedFaceIndex: index, values: { ...INITIAL_VALUES } }),
 }));

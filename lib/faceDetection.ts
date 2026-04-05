@@ -180,3 +180,102 @@ export function extractFaceContours(
     boundingBox: bbox,
   };
 }
+
+/**
+ * Extract contours from a single RNMLKitFace.
+ * Shared logic used by both extractFaceContours and extractAllFaceContours.
+ */
+function extractSingleFaceContours(face: RNMLKitFace): FaceContours {
+  const bbox = {
+    x: face.frame.origin.x,
+    y: face.frame.origin.y,
+    width: face.frame.size.x,
+    height: face.frame.size.y,
+  };
+
+  const contourMap = new Map<string, Point[]>();
+  if (face.contours) {
+    for (const contour of face.contours) {
+      if (contour.type && contour.points && contour.points.length > 0) {
+        contourMap.set(
+          contour.type,
+          contour.points.map((p) => ({ x: p.x, y: p.y })),
+        );
+      }
+    }
+  }
+
+  const getContour = (pascal: string, camel: string) =>
+    contourMap.get(pascal) ?? contourMap.get(camel);
+
+  const faceOval =
+    getContour('Face', 'faceOval') ??
+    syntheticFaceOval(bbox.x, bbox.y, bbox.width, bbox.height);
+
+  const leftEye = getContour('LeftEye', 'leftEye');
+  const rightEye = getContour('RightEye', 'rightEye');
+  const eyes =
+    leftEye && rightEye
+      ? { leftEye, rightEye }
+      : syntheticEyes(bbox.x, bbox.y, bbox.width, bbox.height);
+
+  const noseBridge = getContour('NoseBridge', 'noseBridge');
+  const noseBottom = getContour('NoseBottom', 'noseBottom');
+  const nose =
+    noseBridge && noseBottom
+      ? { noseBridge, noseBottom }
+      : syntheticNose(bbox.x, bbox.y, bbox.width, bbox.height);
+
+  const upperLipTop = getContour('UpperLipTop', 'upperLipTop') ?? [];
+  const upperLipBottom = getContour('UpperLipBottom', 'upperLipBottom') ?? [];
+  const lowerLipTop = getContour('LowerLipTop', 'lowerLipTop') ?? [];
+  const lowerLipBottom = getContour('LowerLipBottom', 'lowerLipBottom') ?? [];
+
+  const leftEyebrowTop = getContour('LeftEyebrowTop', 'leftEyebrowTop') ?? [];
+  const leftEyebrowBottom = getContour('LeftEyebrowBottom', 'leftEyebrowBottom') ?? [];
+  const rightEyebrowTop = getContour('RightEyebrowTop', 'rightEyebrowTop') ?? [];
+  const rightEyebrowBottom = getContour('RightEyebrowBottom', 'rightEyebrowBottom') ?? [];
+
+  return {
+    faceOval,
+    leftEye: eyes.leftEye,
+    rightEye: eyes.rightEye,
+    leftEyebrowTop,
+    leftEyebrowBottom,
+    rightEyebrowTop,
+    rightEyebrowBottom,
+    noseBridge: nose.noseBridge,
+    noseBottom: nose.noseBottom,
+    upperLipTop,
+    upperLipBottom,
+    lowerLipTop,
+    lowerLipBottom,
+    boundingBox: bbox,
+  };
+}
+
+/**
+ * Extract structured face contours from ALL detected faces.
+ * Returns array sorted by bounding box area descending (largest first).
+ * Falls back to synthetic contours per face individually.
+ */
+export function extractAllFaceContours(
+  faces: RNMLKitFace[],
+): FaceContours[] {
+  if (!faces || faces.length === 0) return [];
+
+  const allContours = faces.map((face) => extractSingleFaceContours(face));
+
+  // Sort by bounding box area descending (largest first)
+  allContours.sort((a, b) => {
+    const areaA = a.boundingBox.width * a.boundingBox.height;
+    const areaB = b.boundingBox.width * b.boundingBox.height;
+    return areaB - areaA;
+  });
+
+  console.log(
+    `[FaceDetection] extractAllFaceContours: ${allContours.length} faces processed`,
+  );
+
+  return allContours;
+}
