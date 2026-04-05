@@ -16,12 +16,11 @@ import type { FaceValues } from '@/store/reshapeStore';
 
 interface SkiaDeformCanvasProps {
   imageUri: string;
-  /** Single mesh containing ALL faces */
   mesh: MultiFaceMesh;
-  /** Per-face saved values (for non-selected faces) */
   allFaceValues: FaceValues[];
-  /** Which face the slider is controlling */
   selectedFaceIndex: number;
+  /** Incremented when face switch or value save happens — forces worklet refresh */
+  version: SharedValue<number>;
   canvasWidth: number;
   canvasHeight: number;
   imageWidth: number;
@@ -60,6 +59,7 @@ export function SkiaDeformCanvas({
   mesh,
   allFaceValues,
   selectedFaceIndex,
+  version,
   canvasWidth,
   canvasHeight,
   imageWidth,
@@ -88,6 +88,8 @@ export function SkiaDeformCanvas({
   // Compute displaced positions for ALL faces in a single pass
   // Selected face uses SharedValues (60fps), others use saved store values
   const displayVertices = useDerivedValue(() => {
+    // Read version to force worklet re-run when face switch or values save happens
+    const _v = version.value;
     if (showOriginal.value) {
       return positions.map((p: Point) =>
         vec(p.x * scale + offsetX, p.y * scale + offsetY),
@@ -150,7 +152,7 @@ export function SkiaDeformCanvas({
     return displaced.map((p: Point) =>
       vec(p.x * scale + offsetX, p.y * scale + offsetY),
     );
-  }, [sv.faceSlim, sv.jawline, sv.chin, sv.forehead, sv.eyeEnlarge, sv.eyeDistance, sv.noseSlim, sv.noseLength, sv.lipFullness, sv.smile, showOriginal]);
+  }, [sv.faceSlim, sv.jawline, sv.chin, sv.forehead, sv.eyeEnlarge, sv.eyeDistance, sv.noseSlim, sv.noseLength, sv.lipFullness, sv.smile, showOriginal, version]);
 
   if (!image) return null;
 

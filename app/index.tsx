@@ -52,6 +52,7 @@ export default function ReshapeScreen() {
     smile: useSharedValue(0),
   };
   const showOriginal = useSharedValue(false);
+  const version = useSharedValue(0);
   const activeSharedValue = svMap[selectedTool];
 
   // Load bundled image
@@ -83,11 +84,12 @@ export default function ReshapeScreen() {
     setDetection(allContours, multiFaceMesh);
   }, [mlkitFaces, imageWidth, imageHeight, setDetection]);
 
-  // Load saved values into SharedValues when face changes
+  // Load saved values into SharedValues when face changes + bump version
   useEffect(() => {
     for (const key of Object.keys(svMap)) {
       svMap[key as keyof typeof svMap].value = values[key as keyof typeof svMap] ?? 0;
     }
+    version.value = version.value + 1;
   }, [selectedFaceIndex]);
 
   const canvasHeight = screenHeight - 44 - 36 - 24 - 56 - 64 - 40;
@@ -186,6 +188,7 @@ export default function ReshapeScreen() {
               mesh={mesh}
               allFaceValues={allFaceValues}
               selectedFaceIndex={selectedFaceIndex}
+              version={version}
               canvasWidth={screenWidth}
               canvasHeight={canvasHeight}
               imageWidth={imageWidth}
