@@ -4,16 +4,12 @@ import {
   Vertices,
   Image as SkiaImage,
   vec,
-  Group,
-  Path,
-  Blur,
   Skia,
   ImageShader,
 } from '@shopify/react-native-skia';
 import type { SkImage, SkPoint } from '@shopify/react-native-skia';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import { computeDisplacedPositions } from '@/lib/displacements';
-import { buildExpandedFaceOvalPath } from '@/lib/backgroundBlend';
 import type { Point } from '@/lib/types';
 import type { FaceData, FaceValues } from '@/store/reshapeStore';
 
@@ -29,7 +25,6 @@ interface SkiaDeformCanvasProps {
   showOriginal: SharedValue<boolean>;
 }
 
-const FEATHER_RADIUS = 15;
 
 function useSkiaImage(uri: string | null): SkImage | null {
   const [image, setImage] = useState<SkImage | null>(null);
@@ -116,21 +111,6 @@ export function SkiaDeformCanvas({
     return selectedFace.mesh.texCoords.map((t) => vec(t.x * imageWidth, t.y * imageHeight));
   }, [selectedFace?.mesh.texCoords, imageWidth, imageHeight]);
 
-  // Mask for selected face
-  const selectedMaskPath = useMemo(() => {
-    if (!selectedFace) return null;
-    const oval = selectedFace.contours.faceOval;
-    if (oval.length < 3) return null;
-    let minX = Infinity, maxX = -Infinity;
-    for (const p of oval) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
-    const expandPx = Math.max(60, (maxX - minX) * 0.3);
-    const path = buildExpandedFaceOvalPath(oval, expandPx);
-    const matrix = Skia.Matrix();
-    matrix.translate(offsetX, offsetY);
-    matrix.scale(scale, scale);
-    path.transform(matrix);
-    return path;
-  }, [selectedFace?.contours.faceOval, scale, offsetX, offsetY]);
 
   // Selected face: displaced vertices via useDerivedValue (60fps from SharedValues)
   const selectedMesh = selectedFace?.mesh;
@@ -188,30 +168,15 @@ export function SkiaDeformCanvas({
 
         const textures = face.mesh.texCoords.map((t) => vec(t.x * imageWidth, t.y * imageHeight));
 
-        // Mask path
-        const oval = face.contours.faceOval;
-        if (oval.length < 3) return null;
-        let minX = Infinity, maxX = -Infinity;
-        for (const p of oval) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
-        const expandPx = Math.max(60, (maxX - minX) * 0.3);
-        const maskPath = buildExpandedFaceOvalPath(oval, expandPx);
-        const matrix = Skia.Matrix();
-        matrix.translate(offsetX, offsetY);
-        matrix.scale(scale, scale);
-        maskPath.transform(matrix);
-
-        return { vertices, textures, indices: face.mesh.indices, maskPath, key: i };
+        return { vertices, textures, indices: face.mesh.indices, key: i };
       })
       .filter(Boolean) as Array<{
         vertices: SkPoint[];
         textures: SkPoint[];
         indices: number[];
-        maskPath: ReturnType<typeof Skia.Path.Make>;
         key: number;
       }>;
   }, [faces, selectedFaceIndex, scale, offsetX, offsetY, imageWidth, imageHeight]);
-
-  const layerPaint = useMemo(() => Skia.Paint(), []);
 
   if (!image) return null;
 
@@ -230,42 +195,30 @@ export function SkiaDeformCanvas({
         fit="fill"
       />
 
-      {/* Non-selected faces: static deformation layers (from saved values) */}
+      {/* Non-selected faces: static deformation (from saved values) */}
+      {/* No mask — smooth falloff in displacement functions prevents background warping */}
       {otherFaceLayers.map((layer) => (
-        <Group key={layer.key} layer={layerPaint}>
-          <Vertices
-            vertices={layer.vertices}
-            textures={layer.textures}
-            indices={layer.indices}
-            mode="triangles"
-          >
-            <ImageShader image={image} tx="clamp" ty="clamp" />
-          </Vertices>
-          <Group blendMode="dstIn">
-            <Path path={layer.maskPath} color="white" style="fill">
-              <Blur blur={FEATHER_RADIUS} />
-            </Path>
-          </Group>
-        </Group>
+        <Vertices
+          key={layer.key}
+          vertices={layer.vertices}
+          textures={layer.textures}
+          indices={layer.indices}
+          mode="triangles"
+        >
+          <ImageShader image={image} tx="clamp" ty="clamp" />
+        </Vertices>
       ))}
 
       {/* Selected face: live deformation from SharedValues (60fps) */}
-      {selectedFace && selectedMaskPath && (
-        <Group layer={layerPaint}>
-          <Vertices
-            vertices={selectedVertices}
-            textures={selectedTexturePoints}
-            indices={selectedFace.mesh.indices}
-            mode="triangles"
-          >
-            <ImageShader image={image} tx="clamp" ty="clamp" />
-          </Vertices>
-          <Group blendMode="dstIn">
-            <Path path={selectedMaskPath} color="white" style="fill">
-              <Blur blur={FEATHER_RADIUS} />
-            </Path>
-          </Group>
-        </Group>
+      {selectedFace && (
+        <Vertices
+          vertices={selectedVertices}
+          textures={selectedTexturePoints}
+          indices={selectedFace.mesh.indices}
+          mode="triangles"
+        >
+          <ImageShader image={image} tx="clamp" ty="clamp" />
+        </Vertices>
       )}
     </Canvas>
   );
