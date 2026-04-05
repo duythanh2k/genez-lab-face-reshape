@@ -180,10 +180,7 @@ function FaceDeformLayer({
     return displaced.map((p: Point) =>
       vec(p.x * scale + offsetX, p.y * scale + offsetY),
     );
-  }, isSelected
-    ? [sv.faceSlim, sv.jawline, sv.chin, sv.forehead, sv.eyeEnlarge, sv.eyeDistance, sv.noseSlim, sv.noseLength, sv.lipFullness, sv.smile, showOriginal]
-    : [showOriginal],
-  );
+  }, [sv.faceSlim, sv.jawline, sv.chin, sv.forehead, sv.eyeEnlarge, sv.eyeDistance, sv.noseSlim, sv.noseLength, sv.lipFullness, sv.smile, showOriginal]);
 
   const layerPaint = useMemo(() => Skia.Paint(), []);
 
