@@ -12,7 +12,12 @@ export type ReshapeTool =
   | 'noseLength'
   | 'lipFullness'
   | 'smile'
-  | 'forehead';
+  | 'forehead'
+  | 'skinSmooth'
+  | 'skinTone'
+  | 'darkCircles'
+  | 'teethWhiten'
+  | 'eyeRetouch';
 
 export const RESHAPE_TOOLS: { key: ReshapeTool; label: string; icon: string }[] = [
   { key: 'faceSlim', label: 'Face', icon: 'face-man-shimmer' },
@@ -25,6 +30,11 @@ export const RESHAPE_TOOLS: { key: ReshapeTool; label: string; icon: string }[] 
   { key: 'noseLength', label: 'Nose Len', icon: 'arrow-up-down' },
   { key: 'lipFullness', label: 'Lips', icon: 'lipstick' },
   { key: 'smile', label: 'Smile', icon: 'emoticon-happy-outline' },
+  { key: 'skinSmooth', label: 'Smooth', icon: 'blur' },
+  { key: 'skinTone', label: 'Skin Tone', icon: 'palette-outline' },
+  { key: 'darkCircles', label: 'Dark Circles', icon: 'eye-off-outline' },
+  { key: 'teethWhiten', label: 'Teeth', icon: 'tooth-outline' },
+  { key: 'eyeRetouch', label: 'Eyes', icon: 'eye-plus-outline' },
 ];
 
 export type FaceValues = Record<ReshapeTool, number>;
@@ -33,6 +43,7 @@ export const INITIAL_VALUES: FaceValues = {
   faceSlim: 0, jawline: 0, chin: 0, forehead: 0,
   eyeEnlarge: 0, eyeDistance: 0, noseSlim: 0, noseLength: 0,
   lipFullness: 0, smile: 0,
+  skinSmooth: 0, skinTone: 0, darkCircles: 0, teethWhiten: 0, eyeRetouch: 0,
 };
 
 interface ReshapeState {

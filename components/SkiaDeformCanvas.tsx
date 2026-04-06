@@ -9,15 +9,26 @@ import {
 } from '@shopify/react-native-skia';
 import type { SkImage } from '@shopify/react-native-skia';
 import { computeDisplacedPositions } from '@/lib/displacements';
-import type { Point } from '@/lib/types';
+import { BeautyEffectLayer } from '@/components/BeautyEffectLayer';
+import type { Point, FaceContours } from '@/lib/types';
 import type { MultiFaceMesh } from '@/lib/meshDeformation';
 import type { FaceValues } from '@/store/reshapeStore';
+
+const BEAUTY_KEYS = [
+  'skinSmooth',
+  'skinTone',
+  'darkCircles',
+  'teethWhiten',
+  'eyeRetouch',
+] as const;
 
 interface SkiaDeformCanvasProps {
   imageUri: string;
   mesh: MultiFaceMesh;
   /** Per-face values — ALL faces' current slider values */
   allFaceValues: FaceValues[];
+  /** Detected face contours for beauty mask rendering */
+  detectedFaces: FaceContours[];
   canvasWidth: number;
   canvasHeight: number;
   imageWidth: number;
@@ -56,6 +67,7 @@ export function SkiaDeformCanvas({
   imageUri,
   mesh,
   allFaceValues,
+  detectedFaces,
   canvasWidth,
   canvasHeight,
   imageWidth,
@@ -127,6 +139,22 @@ export function SkiaDeformCanvas({
       >
         <ImageShader image={image} tx="clamp" ty="clamp" />
       </Vertices>
+      {detectedFaces.map((face, i) => {
+        const v = allFaceValues[i];
+        if (!v) return null;
+        const hasBeauty = BEAUTY_KEYS.some((k) => v[k] !== 0);
+        if (!hasBeauty) return null;
+        return (
+          <BeautyEffectLayer
+            key={`beauty-${i}`}
+            contours={face}
+            values={v}
+            scale={scale}
+            offsetX={offsetX}
+            offsetY={offsetY}
+          />
+        );
+      })}
     </Canvas>
   );
 }

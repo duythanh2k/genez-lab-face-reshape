@@ -52,7 +52,7 @@ const ToolItem = memo(function ToolItem({
   return (
     <Pressable
       onPress={handlePress}
-      style={styles.toolItem}
+      style={[styles.toolItem, tool === 'skinSmooth' && styles.beautyFirst]}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ selected: isSelected }}
@@ -167,5 +167,11 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
+  },
+  beautyFirst: {
+    marginLeft: 16,
+    borderLeftWidth: 1,
+    borderLeftColor: '#2E2E2E',
+    paddingLeft: 4,
   },
 });

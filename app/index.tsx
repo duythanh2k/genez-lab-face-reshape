@@ -149,6 +149,7 @@ export default function ReshapeScreen() {
               imageUri={imageUri}
               mesh={mesh}
               allFaceValues={allFaceValues}
+              detectedFaces={detectedFaces}
               canvasWidth={screenWidth}
               canvasHeight={canvasHeight}
               imageWidth={imageWidth}
