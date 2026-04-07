@@ -1,7 +1,12 @@
 import { memo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, FlatList } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { type ReshapeTool, RESHAPE_TOOLS } from '@/store/reshapeStore';
+import {
+  type ReshapeTool,
+  type ToolKey,
+  type FaceValues,
+  RESHAPE_TOOLS,
+} from '@/store/reshapeStore';
 
 // --- Colors ---
 
@@ -19,20 +24,20 @@ const ICON_SIZE = 20;
 // --- Props ---
 
 interface ReshapeToolStripProps {
-  selectedTool: ReshapeTool;
-  values: Record<ReshapeTool, number>;
-  onSelectTool: (tool: ReshapeTool) => void;
+  selectedTool: ToolKey;
+  values: FaceValues;
+  onSelectTool: (tool: ToolKey) => void;
 }
 
 // --- ToolItem ---
 
 interface ToolItemProps {
-  tool: ReshapeTool;
+  tool: ToolKey;
   label: string;
   icon: string;
   isSelected: boolean;
   isModified: boolean;
-  onPress: (tool: ReshapeTool) => void;
+  onPress: (tool: ToolKey) => void;
 }
 
 const ToolItem = memo(function ToolItem({
@@ -105,16 +110,22 @@ export function ReshapeToolStrip({
   }, [selectedTool]);
 
   const renderItem = useCallback(
-    ({ item }: { item: (typeof RESHAPE_TOOLS)[number] }) => (
-      <ToolItem
-        tool={item.key}
-        label={item.label}
-        icon={item.icon}
-        isSelected={selectedTool === item.key}
-        isModified={values[item.key] !== 0}
-        onPress={onSelectTool}
-      />
-    ),
+    ({ item }: { item: (typeof RESHAPE_TOOLS)[number] }) => {
+      const isModified =
+        item.key === 'lipstick'
+          ? values.lipstick.intensity !== 0
+          : values[item.key as ReshapeTool] !== 0;
+      return (
+        <ToolItem
+          tool={item.key}
+          label={item.label}
+          icon={item.icon}
+          isSelected={selectedTool === item.key}
+          isModified={isModified}
+          onPress={onSelectTool}
+        />
+      );
+    },
     [selectedTool, values, onSelectTool],
   );
 

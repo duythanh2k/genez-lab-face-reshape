@@ -39,6 +39,10 @@ interface ReshapeSliderProps {
   sharedValue?: SharedValue<number>;
   onValueChange: (value: number) => void;
   onReset: () => void;
+  /** Minimum slider value (default: -100 bipolar). Pass 0 for unipolar mode. */
+  min?: number;
+  /** Maximum slider value (default: 100). */
+  max?: number;
 }
 
 // --- Component ---
@@ -49,13 +53,13 @@ export function ReshapeSlider({
   sharedValue,
   onValueChange,
   onReset,
+  min = -100,
+  max = 100,
 }: ReshapeSliderProps) {
   const { width: screenWidth } = useWindowDimensions();
   const trackWidth = screenWidth - HORIZONTAL_PADDING * 2;
   const isModified = value !== 0;
-
-  const min = -100;
-  const max = 100;
+  const isUnipolar = min === 0;
 
   // Stable callback ref
   const onValueChangeRef = useRef(onValueChange);
@@ -68,13 +72,21 @@ export function ReshapeSlider({
   // Conversion
   const valueToPosition = useCallback(
     (v: number): number => ((v - min) / (max - min)) * trackWidth,
-    [trackWidth],
+    [trackWidth, min, max],
   );
 
   // Shared values for UI-thread gesture
   const thumbX = useSharedValue(valueToPosition(value));
   const startX = useSharedValue(0);
   const lastUpdateTime = useSharedValue(0);
+
+  // Wrap min/max in SharedValues so worklets read current values (no stale closures)
+  const minShared = useSharedValue(min);
+  const maxShared = useSharedValue(max);
+  useEffect(() => {
+    minShared.value = min;
+    maxShared.value = max;
+  }, [min, max, minShared, maxShared]);
 
   // Reset button opacity
   const resetOpacity = useSharedValue(isModified ? 1 : 0);
@@ -105,15 +117,15 @@ export function ReshapeSlider({
     .onUpdate((event) => {
       'worklet';
       const tw = trackWidthShared.value;
+      const mn = minShared.value;
+      const mx = maxShared.value;
       const newX = Math.min(Math.max(startX.value + event.translationX, 0), tw);
       thumbX.value = newX;
 
-      const v = Math.round(min + (newX / tw) * (max - min));
+      const v = Math.round(mn + (newX / tw) * (mx - mn));
 
-      // Pro mode: update shared value directly on UI thread
       if (sharedValue) sharedValue.value = v;
 
-      // Throttled runOnJS for display label
       const now = Date.now();
       if (now - lastUpdateTime.value >= LABEL_THROTTLE_MS) {
         lastUpdateTime.value = now;
@@ -123,7 +135,9 @@ export function ReshapeSlider({
     .onEnd(() => {
       'worklet';
       const tw = trackWidthShared.value;
-      const v = Math.round(min + (thumbX.value / tw) * (max - min));
+      const mn = minShared.value;
+      const mx = maxShared.value;
+      const v = Math.round(mn + (thumbX.value / tw) * (mx - mn));
       if (sharedValue) sharedValue.value = v;
       runOnJS(handleValueChange)(v);
     });
@@ -131,10 +145,12 @@ export function ReshapeSlider({
   const tapGesture = Gesture.Tap().onEnd((event) => {
     'worklet';
     const tw = trackWidthShared.value;
+    const mn = minShared.value;
+    const mx = maxShared.value;
     const newX = Math.min(Math.max(event.x - HORIZONTAL_PADDING, 0), tw);
     thumbX.value = newX;
-    const v = Math.round(min + (newX / tw) * (max - min));
-    sharedValue.value = v;
+    const v = Math.round(mn + (newX / tw) * (mx - mn));
+    if (sharedValue) sharedValue.value = v;
     runOnJS(handleValueChange)(v);
   });
 
@@ -148,6 +164,11 @@ export function ReshapeSlider({
 
   const fillStyle = useAnimatedStyle(() => {
     const current = thumbX.value;
+    if (isUnipolar) {
+      // Unipolar: fill from left edge to thumb
+      return { left: 0, width: current };
+    }
+    // Bipolar: fill from zero marker to thumb
     if (current >= zeroX) {
       return { left: zeroX, width: current - zeroX };
     }
@@ -168,7 +189,13 @@ export function ReshapeSlider({
           {toolName}
         </Text>
         <Text style={styles.valueText} numberOfLines={1}>
-          {value === 0 ? '0' : value > 0 ? `+${value}` : `${value}`}
+          {isUnipolar
+            ? `${value}`
+            : value === 0
+              ? '0'
+              : value > 0
+                ? `+${value}`
+                : `${value}`}
         </Text>
         <Animated.View style={resetButtonStyle}>
           <Pressable
@@ -194,13 +221,15 @@ export function ReshapeSlider({
               <Animated.View style={[styles.fill, fillStyle]} />
             </View>
 
-            {/* Zero marker */}
-            <View
-              style={[
-                styles.zeroMarker,
-                { left: HORIZONTAL_PADDING + zeroX - ZERO_MARKER_WIDTH / 2 },
-              ]}
-            />
+            {/* Zero marker — only in bipolar mode */}
+            {!isUnipolar && (
+              <View
+                style={[
+                  styles.zeroMarker,
+                  { left: HORIZONTAL_PADDING + zeroX - ZERO_MARKER_WIDTH / 2 },
+                ]}
+              />
+            )}
 
             {/* Thumb */}
             <Animated.View style={[styles.thumb, thumbStyle]} />

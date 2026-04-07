@@ -187,3 +187,42 @@ export function buildEyeMask(
 
   return path;
 }
+
+/**
+ * Build lip mask from ML Kit lip contours with EvenOdd fill rule.
+ * Outer boundary: upperLipTop → lowerLipBottom (reversed)
+ * Inner hole: upperLipBottom → lowerLipTop (reversed) — mouth opening
+ * The EvenOdd fill rule cuts the mouth opening out of the outer lip region,
+ * so lipstick color does not land on teeth/tongue.
+ */
+export function buildLipMask(
+  contours: FaceContours,
+  scale: number,
+  offsetX: number,
+  offsetY: number,
+): SkPath | null {
+  const { upperLipTop, upperLipBottom, lowerLipTop, lowerLipBottom } = contours;
+  if (upperLipTop.length < 3 || lowerLipBottom.length < 3) return null;
+
+  const path = Skia.Path.Make();
+  // EvenOdd fill: inner subpath becomes a hole
+  path.setFillType(1 as any);
+
+  // Outer lip boundary: upperLipTop left→right + lowerLipBottom right→left
+  const outerPoints = [...upperLipTop];
+  for (let i = lowerLipBottom.length - 1; i >= 0; i--) {
+    outerPoints.push(lowerLipBottom[i]);
+  }
+  addContourToPath(path, outerPoints, scale, offsetX, offsetY);
+
+  // Inner mouth opening (if available): upperLipBottom left→right + lowerLipTop right→left
+  if (upperLipBottom.length >= 3 && lowerLipTop.length >= 3) {
+    const innerPoints = [...upperLipBottom];
+    for (let i = lowerLipTop.length - 1; i >= 0; i--) {
+      innerPoints.push(lowerLipTop[i]);
+    }
+    addContourToPath(path, innerPoints, scale, offsetX, offsetY);
+  }
+
+  return path;
+}

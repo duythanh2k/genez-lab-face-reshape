@@ -12,8 +12,16 @@ import { buildMultiFaceMesh } from '@/lib/meshDeformation';
 import { SkiaDeformCanvas } from '@/components/SkiaDeformCanvas';
 import { ReshapeSlider } from '@/components/ReshapeSlider';
 import { ReshapeToolStrip } from '@/components/ReshapeToolStrip';
+import { LipstickColorPicker } from '@/components/LipstickColorPicker';
 import { TopBar, TEST_IMAGES } from '@/components/TopBar';
-import { useReshapeStore, RESHAPE_TOOLS } from '@/store/reshapeStore';
+import {
+  useReshapeStore,
+  RESHAPE_TOOLS,
+  type ReshapeTool,
+  type ToolKey,
+} from '@/store/reshapeStore';
+
+const LIPSTICK_PICKER_HEIGHT = 56;
 
 export default function ReshapeScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -37,6 +45,11 @@ export default function ReshapeScreen() {
   const setImage = useReshapeStore((s) => s.setImage);
   const setDetection = useReshapeStore((s) => s.setDetection);
   const selectFace = useReshapeStore((s) => s.selectFace);
+  const setLipstickColor = useReshapeStore((s) => s.setLipstickColor);
+  const setLipstickIntensity = useReshapeStore((s) => s.setLipstickIntensity);
+  const resetLipstick = useReshapeStore((s) => s.resetLipstick);
+
+  const isLipstickSelected = selectedTool === 'lipstick';
 
   // Load bundled image
   useEffect(() => {
@@ -62,24 +75,47 @@ export default function ReshapeScreen() {
     setDetection(allContours, multiFaceMesh);
   }, [mlkitFaces, imageWidth, imageHeight, setDetection]);
 
-  const canvasHeight = screenHeight - 44 - 36 - 24 - 56 - 64 - 40;
+  // Reserve space for the lipstick color picker when active
+  const canvasHeight =
+    screenHeight -
+    44 -
+    36 -
+    24 -
+    56 -
+    64 -
+    40 -
+    (isLipstickSelected ? LIPSTICK_PICKER_HEIGHT : 0);
 
   // Tap coordinate transform
   const imgScale = Math.min(screenWidth / imageWidth, canvasHeight / imageHeight);
   const oX = (screenWidth - imageWidth * imgScale) / 2;
   const oY = (canvasHeight - imageHeight * imgScale) / 2;
 
-  const handleSelectTool = useCallback((tool: (typeof RESHAPE_TOOLS)[number]['key']) => {
-    setSelectedTool(tool);
-  }, [setSelectedTool]);
+  const handleSelectTool = useCallback(
+    (tool: ToolKey) => {
+      setSelectedTool(tool);
+    },
+    [setSelectedTool],
+  );
 
-  const handleValueChange = useCallback((value: number) => {
-    setValue(selectedTool, value);
-  }, [selectedTool, setValue]);
+  const handleValueChange = useCallback(
+    (value: number) => {
+      if (isLipstickSelected) {
+        setLipstickIntensity(value);
+      } else {
+        setValue(selectedTool as ReshapeTool, value);
+      }
+    },
+    [isLipstickSelected, selectedTool, setValue, setLipstickIntensity],
+  );
 
   const handleReset = useCallback(() => {
-    resetTool(selectedTool);
-  }, [selectedTool, resetTool]);
+    if (isLipstickSelected) {
+      resetLipstick();
+    } else {
+      resetTool(selectedTool as ReshapeTool);
+    }
+  }, [isLipstickSelected, selectedTool, resetTool, resetLipstick]);
 
   const handleResetAll = useCallback(() => {
     resetAll();
@@ -89,28 +125,39 @@ export default function ReshapeScreen() {
     setSelectedImageIndex(index);
   }, []);
 
-  const handlePickGallery = useCallback(async (uri: string, _w: number, _h: number) => {
-    setSelectedImageIndex(-1);
-    const result = await ImageManipulator.manipulateAsync(uri, [], {
-      compress: 0.9, format: ImageManipulator.SaveFormat.JPEG,
-    });
-    setImage(result.uri, result.width, result.height);
-  }, [setImage]);
+  const handlePickGallery = useCallback(
+    async (uri: string, _w: number, _h: number) => {
+      setSelectedImageIndex(-1);
+      const result = await ImageManipulator.manipulateAsync(uri, [], {
+        compress: 0.9,
+        format: ImageManipulator.SaveFormat.JPEG,
+      });
+      setImage(result.uri, result.width, result.height);
+    },
+    [setImage],
+  );
 
   // Tap to select face
-  const handleFaceTap = useCallback((tapX: number, tapY: number) => {
-    if (faceCount <= 1) return;
-    const imageX = Math.max(0, Math.min(imageWidth, (tapX - oX) / imgScale));
-    const imageY = Math.max(0, Math.min(imageHeight, (tapY - oY) / imgScale));
-    for (let i = 0; i < detectedFaces.length; i++) {
-      const bb = detectedFaces[i].boundingBox;
-      if (imageX >= bb.x && imageX <= bb.x + bb.width &&
-          imageY >= bb.y && imageY <= bb.y + bb.height) {
-        if (i !== selectedFaceIndex) selectFace(i);
-        return;
+  const handleFaceTap = useCallback(
+    (tapX: number, tapY: number) => {
+      if (faceCount <= 1) return;
+      const imageX = Math.max(0, Math.min(imageWidth, (tapX - oX) / imgScale));
+      const imageY = Math.max(0, Math.min(imageHeight, (tapY - oY) / imgScale));
+      for (let i = 0; i < detectedFaces.length; i++) {
+        const bb = detectedFaces[i].boundingBox;
+        if (
+          imageX >= bb.x &&
+          imageX <= bb.x + bb.width &&
+          imageY >= bb.y &&
+          imageY <= bb.y + bb.height
+        ) {
+          if (i !== selectedFaceIndex) selectFace(i);
+          return;
+        }
       }
-    }
-  }, [detectedFaces, selectedFaceIndex, selectFace, imageWidth, imageHeight, imgScale, oX, oY, faceCount]);
+    },
+    [detectedFaces, selectedFaceIndex, selectFace, imageWidth, imageHeight, imgScale, oX, oY, faceCount],
+  );
 
   const tapGesture = Gesture.Tap().onEnd((e) => {
     'worklet';
@@ -118,7 +165,15 @@ export default function ReshapeScreen() {
   });
 
   const isDetecting = status === 'detecting' || status === 'modelLoading';
-  const currentToolLabel = RESHAPE_TOOLS.find((t) => t.key === selectedTool)?.label ?? '';
+  const currentToolLabel =
+    RESHAPE_TOOLS.find((t) => t.key === selectedTool)?.label ?? '';
+
+  // Slider value, min, max routed based on active tool
+  const sliderValue = isLipstickSelected
+    ? values.lipstick.intensity
+    : values[selectedTool as ReshapeTool];
+  const sliderMin = isLipstickSelected ? 0 : -100;
+  const sliderMax = 100;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0D0D0D' }}>
@@ -131,16 +186,29 @@ export default function ReshapeScreen() {
 
       <View style={{ paddingHorizontal: 16, height: 24, justifyContent: 'center' }}>
         <Text style={{ color: '#666666', fontSize: 11 }}>
-          {isDetecting ? 'Detecting face...'
-            : mesh ? `Face ${selectedFaceIndex + 1}/${faceCount}${faceCount > 1 ? ' | Tap face to switch' : ''}`
-            : 'No face found'}
+          {isDetecting
+            ? 'Detecting face...'
+            : mesh
+              ? `Face ${selectedFaceIndex + 1}/${faceCount}${faceCount > 1 ? ' | Tap face to switch' : ''}`
+              : 'No face found'}
         </Text>
       </View>
 
       <GestureDetector gesture={tapGesture}>
         <View style={{ flex: 1, backgroundColor: '#0D0D0D' }}>
           {isDetecting && (
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                justifyContent: 'center',
+                alignItems: 'center',
+                zIndex: 10,
+              }}
+            >
               <ActivityIndicator size="large" color="#00D2FF" />
             </View>
           )}
@@ -159,9 +227,18 @@ export default function ReshapeScreen() {
         </View>
       </GestureDetector>
 
+      {isLipstickSelected && (
+        <LipstickColorPicker
+          selectedIndex={values.lipstick.colorIndex}
+          onSelect={setLipstickColor}
+        />
+      )}
+
       <ReshapeSlider
         toolName={currentToolLabel}
-        value={values[selectedTool]}
+        value={sliderValue}
+        min={sliderMin}
+        max={sliderMax}
         onValueChange={handleValueChange}
         onReset={handleReset}
       />

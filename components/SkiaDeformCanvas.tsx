@@ -10,6 +10,7 @@ import {
 import type { SkImage } from '@shopify/react-native-skia';
 import { computeDisplacedPositions } from '@/lib/displacements';
 import { BeautyEffectLayer } from '@/components/BeautyEffectLayer';
+import { LipstickLayer } from '@/components/LipstickLayer';
 import type { Point, FaceContours } from '@/lib/types';
 import type { MultiFaceMesh } from '@/lib/meshDeformation';
 import type { FaceValues } from '@/store/reshapeStore';
@@ -149,6 +150,21 @@ export function SkiaDeformCanvas({
             key={`beauty-${i}`}
             contours={face}
             values={v}
+            scale={scale}
+            offsetX={offsetX}
+            offsetY={offsetY}
+          />
+        );
+      })}
+      {detectedFaces.map((face, i) => {
+        const v = allFaceValues[i];
+        if (!v?.lipstick || v.lipstick.intensity === 0) return null;
+        return (
+          <LipstickLayer
+            key={`lipstick-${i}`}
+            contours={face}
+            colorIndex={v.lipstick.colorIndex}
+            intensity={v.lipstick.intensity}
             scale={scale}
             offsetX={offsetX}
             offsetY={offsetY}
